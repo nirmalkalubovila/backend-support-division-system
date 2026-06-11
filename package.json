@@ -1,0 +1,45 @@
+{
+  "name": "backend-support-division-system",
+  "version": "1.0.0",
+  "description": "Prologics Support Division System — Backend API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "seed": "node src/seeders/index.js",
+    "permissions": "node src/scripts/generate-permissions.js",
+    "lint": "eslint src/",
+    "test": "jest --forceExit --detectOpenHandles"
+  },
+  "keywords": [
+    "support",
+    "division",
+    "prologics",
+    "api"
+  ],
+  "author": "Prologics (Pvt) Ltd",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "http-status": "^1.7.4",
+    "joi": "^17.13.3",
+    "jsonwebtoken": "^9.0.2",
+    "moment": "^2.30.1",
+    "mongoose": "^8.14.1",
+    "morgan": "^1.10.0",
+    "nodemailer": "^6.10.1",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "winston": "^3.17.0",
+    "xss-clean": "^0.1.4"
+  },
+  "devDependencies": {
+    "eslint": "^9.18.0",
+    "nodemon": "^3.1.9"
+  }
+}
