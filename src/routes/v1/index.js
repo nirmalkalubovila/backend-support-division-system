@@ -1,6 +1,7 @@
 const express = require('express');
 const authRoute = require('./auth/auth.route');
 const userRoute = require('./user-management/user.route');
+const settingRoute = require('./system/setting.route');
 
 const router = express.Router();
 
@@ -12,6 +13,10 @@ const defaultRoutes = [
   {
     path: '/users',
     route: userRoute,
+  },
+  {
+    path: '/system',
+    route: settingRoute,
   },
 ];
 

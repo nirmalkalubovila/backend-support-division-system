@@ -4,6 +4,7 @@ const xss = require('xss-clean');
 const cors = require('cors');
 const passport = require('passport');
 const httpStatus = require('http-status');
+const path = require('path');
 const config = require('./config/config');
 const morgan = require('./config/morgan');
 const { jwtStrategy } = require('./config/passport');
@@ -20,7 +21,10 @@ if (config.env !== 'test') {
 }
 
 // set security HTTP headers
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+// Serve static uploaded logo files
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // parse json request body
 app.use(express.json());

@@ -2,6 +2,7 @@ const connectDB = require('../config/db');
 const seedPermissions = require('./seed-permissions');
 const seedRoles = require('./seed-roles');
 const seedSuperAdmin = require('./seed-super-admin');
+const seedSettings = require('./seed-settings');
 const logger = require('../config/logger');
 
 const runSeeders = async () => {
@@ -13,6 +14,7 @@ const runSeeders = async () => {
     await seedPermissions();
     await seedRoles();
     await seedSuperAdmin();
+    await seedSettings();
 
     logger.info('Database seeding completed successfully.');
     process.exit(0);
