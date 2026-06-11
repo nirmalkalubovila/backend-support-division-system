@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const moment = require('moment') || require('../utils/pick'); // fallback
 const config = require('../../config/config');
 const { Token, tokenTypes } = require('../../models');
 

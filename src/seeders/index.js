@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const connectDB = require('../config/db');
 const seedPermissions = require('./seed-permissions');
 const seedRoles = require('./seed-roles');

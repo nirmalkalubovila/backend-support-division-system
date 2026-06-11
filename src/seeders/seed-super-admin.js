@@ -1,5 +1,4 @@
 const { User } = require('../models');
-const config = require('../config/config');
 const logger = require('../config/logger');
 
 const seedSuperAdmin = async () => {
