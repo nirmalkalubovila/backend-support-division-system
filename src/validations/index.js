@@ -1,5 +1,6 @@
 const authValidation = require('./auth/auth.validation');
 const userValidation = require('./user-management/user.validation');
 const settingValidation = require('./system/setting.validation');
+const reportValidation = require('./reports/report.validation');
 
-module.exports = { authValidation, userValidation, settingValidation };
+module.exports = { authValidation, userValidation, settingValidation, reportValidation };

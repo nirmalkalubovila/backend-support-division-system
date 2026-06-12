@@ -4,6 +4,7 @@ const ActivityLog = require('./system/activity-log.model');
 const Permission = require('./system/permission.model');
 const Role = require('./system/role.model');
 const Setting = require('./system/setting.model');
+const Report = require('./reports/report.model');
 
 module.exports = {
   User,
@@ -13,4 +14,5 @@ module.exports = {
   Permission,
   Role,
   Setting,
+  Report,
 };

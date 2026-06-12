@@ -48,11 +48,50 @@ router.patch('/branding',
   settingController.updateBranding
 );
 
+router.get('/priorities', settingController.getPriorities);
+
+router.patch('/priorities',
+  auth('system.settings.update'),
+  validate(settingValidation.updatePriorities),
+  activityLogger('Update system priorities / SLA rules'),
+  settingController.updatePriorities
+);
+
+router.get('/categories', settingController.getCategories);
+
+router.patch('/categories',
+  auth('system.settings.update'),
+  validate(settingValidation.updateCategories),
+  activityLogger('Update system categories'),
+  settingController.updateCategories
+);
+
+router.get('/notifications', settingController.getNotifications);
+
+router.patch('/notifications',
+  auth('system.settings.update'),
+  validate(settingValidation.updateNotifications),
+  activityLogger('Update system notification preferences'),
+  settingController.updateNotifications
+);
+
 router.post('/logo',
   auth('system.settings.update'),
   upload.single('logo'),
   activityLogger('Upload system logo'),
   settingController.uploadLogo
+);
+
+router.get('/report-schedule',
+  auth('system.settings.update'),
+  settingController.getReportSchedule
+);
+
+router.patch('/report-schedule',
+  auth('system.settings.update'),
+  validate(settingValidation.updateReportSchedule),
+  activityLogger('Update report schedules'),
+  settingController.updateReportSchedule
 );
 
 module.exports = router;
