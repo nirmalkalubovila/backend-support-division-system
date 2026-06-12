@@ -6,6 +6,7 @@ const Role = require('./system/role.model');
 const Client = require('./project-management/client.model');
 const Project = require('./project-management/project.model');
 const Issue = require('./issue-management/issue.model');
+const Branding = require('./system/branding.model');
 
 module.exports = {
   User,
@@ -17,4 +18,5 @@ module.exports = {
   Client,
   Project,
   Issue,
+  Branding,
 };

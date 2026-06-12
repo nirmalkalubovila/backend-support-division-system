@@ -73,7 +73,33 @@ const uploadProjectPhoto = multer({
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
 });
 
+// Multer storage configuration for logo
+const logoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const logoDir = path.join(uploadsDir, 'logo');
+    if (!fs.existsSync(logoDir)) {
+      fs.mkdirSync(logoDir, { recursive: true });
+    }
+    cb(null, logoDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    const ext = path.extname(file.originalname);
+    cb(null, `${uniqueSuffix}${ext}`);
+  },
+});
+
+const uploadLogo = multer({
+  storage: logoStorage,
+  fileFilter: imageOnlyFilter,
+  limits: {
+    fileSize: 2 * 1024 * 1024, // 2 MB limit for logos
+    files: 1, // Max 1 file per request
+  },
+});
+
 module.exports = {
   uploadIssueAttachments,
   uploadProjectPhoto,
+  uploadLogo,
 };
