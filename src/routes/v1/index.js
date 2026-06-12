@@ -3,6 +3,9 @@ const authRoute = require('./auth/auth.route');
 const userRoute = require('./user-management/user.route');
 const settingRoute = require('./system/setting.route');
 const reportRoute = require('./reports/report.route');
+const clientRoute = require('./projects/client.route');
+const projectRoute = require('./projects/project.route');
+const issueRoute = require('./issues/issue.route');
 
 const router = express.Router();
 
@@ -22,6 +25,16 @@ const defaultRoutes = [
   {
     path: '/reports',
     route: reportRoute,
+    path: '/clients',
+    route: clientRoute,
+  },
+  {
+    path: '/projects',
+    route: projectRoute,
+  },
+  {
+    path: '/issues',
+    route: issueRoute,
   },
 ];
 

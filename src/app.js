@@ -39,6 +39,9 @@ app.use(xss());
 app.use(cors());
 app.options('*', cors());
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // jwt authentication
 app.use(passport.initialize());
 passport.use('jwt', jwtStrategy);
