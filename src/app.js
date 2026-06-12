@@ -4,6 +4,7 @@ const xss = require('xss-clean');
 const cors = require('cors');
 const passport = require('passport');
 const httpStatus = require('http-status');
+const path = require('path');
 const config = require('./config/config');
 const morgan = require('./config/morgan');
 const { jwtStrategy } = require('./config/passport');
@@ -34,6 +35,9 @@ app.use(xss());
 // enable cors
 app.use(cors());
 app.options('*', cors());
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // jwt authentication
 app.use(passport.initialize());
