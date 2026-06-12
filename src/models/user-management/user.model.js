@@ -102,6 +102,22 @@ userSchema.pre('save', async function (next) {
   next();
 });
 
+// Chain custom toJSON transform to populate role rights in permissions array for frontend usage
+userSchema.options.toJSON = {
+  transform: (doc, ret) => {
+    ret.id = ret._id ? ret._id.toString() : ret.id;
+    delete ret.__v;
+    delete ret.password;
+    
+    // Dynamic import to avoid circular dependencies
+    const { roleRights } = require('../../config/roles');
+    const rights = roleRights.get(ret.role) || [];
+    ret.permissions = Array.from(new Set([...(ret.permissions || []), ...rights]));
+    
+    return ret;
+  }
+};
+
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;

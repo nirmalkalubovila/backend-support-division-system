@@ -30,7 +30,7 @@ roleRights.set('senior_engineer', [
   'projects.client.read',
 ]);
 
-// Manager / PM — full project + report access
+// Manager / PM — full project + report + user access
 roleRights.set('manager', [
   ...roleRights.get('senior_engineer'),
   'projects.project.create',
@@ -52,15 +52,15 @@ roleRights.set('manager', [
   'system.category.delete',
   'system.notification.read',
   'system.notification.update',
+  'user_management.user.create',
+  'user_management.user.read',
+  'user_management.user.update',
+  'user_management.user.delete',
 ]);
 
 // Super Admin — everything
 roleRights.set('super_admin', [
   ...roleRights.get('manager'),
-  'user_management.user.create',
-  'user_management.user.read',
-  'user_management.user.update',
-  'user_management.user.delete',
   'system.settings.update',
   'system.settings.delete',
 ]);
