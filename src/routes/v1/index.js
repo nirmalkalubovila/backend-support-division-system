@@ -13,6 +13,10 @@ const defaultRoutes = [
     path: '/users',
     route: userRoute,
   },
+  {
+    path: '/projects',
+    route: require('./project.route'),
+  },
 ];
 
 defaultRoutes.forEach((route) => {

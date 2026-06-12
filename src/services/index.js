@@ -8,4 +8,5 @@ module.exports = {
   tokenService,
   userService,
   emailService,
+  projectService: require('./projects/project.service'),
 };
