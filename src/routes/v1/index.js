@@ -26,6 +26,8 @@ const defaultRoutes = [
   {
     path: '/reports',
     route: reportRoute,
+  },
+  {
     path: '/clients',
     route: clientRoute,
   },
@@ -37,12 +39,10 @@ const defaultRoutes = [
     path: '/issues',
     route: issueRoute,
   },
-  { path: '/auth', route: authRoute },
-  { path: '/users', route: userRoute },
-  { path: '/clients', route: clientRoute },
-  { path: '/projects', route: projectRoute },
-  { path: '/projects/:projectId/tasks', route: taskRoute },
-  { path: '/issues', route: issueRoute },
+  {
+    path: '/projects/:projectId/tasks',
+    route: taskRoute,
+  },
 ];
 
 defaultRoutes.forEach((route) => {
