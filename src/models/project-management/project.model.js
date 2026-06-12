@@ -13,12 +13,12 @@ const projectSchema = new mongoose.Schema(
     client: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Client',
-      required: true,
+      default: null,
     },
     contractType: {
       type: String,
       enum: ['Monthly Retainer', 'Per-Incident', 'Time & Material', 'Fixed'],
-      required: true,
+      default: null,
     },
     allocatedHours: {
       type: Number,
@@ -34,6 +34,43 @@ const projectSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    // ── New fields ──────────────────────────────────────────
+    description: {
+      type: String,
+      default: null,
+    },
+    photo: {
+      type: String,
+      default: null,
+    },
+    completion: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
+    startDate: {
+      type: Date,
+      default: null,
+    },
+    endDate: {
+      type: Date,
+      default: null,
+    },
+    projectType: {
+      type: [String],
+      enum: ['New Development', 'CR', 'Support'],
+      default: [],
+    },
+    mainContact: {
+      name: { type: String, default: null },
+      email: { type: String, default: null },
+      phone: { type: String, default: null },
+    },
+    techStack: {
+      type: [String],
+      default: [],
+    },
     isActive: {
       type: Boolean,
       default: true,

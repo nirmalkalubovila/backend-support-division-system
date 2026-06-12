@@ -3,9 +3,11 @@ const { Project, Client } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
 const createProject = async (projectBody) => {
-  const client = await Client.findOne({ _id: projectBody.client, deletedAt: null });
-  if (!client) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Client not found');
+  if (projectBody.client) {
+    const client = await Client.findOne({ _id: projectBody.client, deletedAt: null });
+    if (!client) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Client not found');
+    }
   }
   return Project.create(projectBody);
 };
