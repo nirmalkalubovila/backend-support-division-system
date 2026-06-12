@@ -9,6 +9,7 @@ const Client = require('./project-management/client.model');
 const Project = require('./project-management/project.model');
 const Task = require('./project-management/task.model');
 const Issue = require('./issue-management/issue.model');
+const Branding = require('./system/branding.model');
 
 module.exports = {
   User,
@@ -23,4 +24,5 @@ module.exports = {
   Project,
   Task,
   Issue,
+  Branding,
 };

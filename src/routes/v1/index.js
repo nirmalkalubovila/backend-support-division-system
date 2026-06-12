@@ -7,6 +7,7 @@ const clientRoute = require('./projects/client.route');
 const projectRoute = require('./projects/project.route');
 const taskRoute = require('./projects/tasks/task.route');
 const issueRoute = require('./issues/issue.route');
+const systemRoute = require('./system/branding.route');
 
 const router = express.Router();
 
@@ -38,10 +39,6 @@ const defaultRoutes = [
   {
     path: '/issues',
     route: issueRoute,
-  },
-  {
-    path: '/projects/:projectId/tasks',
-    route: taskRoute,
   },
 ];
 
