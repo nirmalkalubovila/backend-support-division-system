@@ -1,12 +1,25 @@
 const Joi = require('joi');
 
+const mainContactSchema = Joi.object({
+  name: Joi.string().allow('', null),
+  email: Joi.string().email().allow('', null),
+  phone: Joi.string().allow('', null),
+});
+
 const createProject = {
   body: Joi.object().keys({
     name: Joi.string().required().max(150),
-    client: Joi.string().required(),
-    contractType: Joi.string().required().valid('Monthly Retainer', 'Per-Incident', 'Time & Material', 'Fixed'),
+    client: Joi.string().allow('', null),
+    contractType: Joi.string().valid('Monthly Retainer', 'Per-Incident', 'Time & Material', 'Fixed').allow(null),
     allocatedHours: Joi.number().min(0).default(0),
     members: Joi.array().items(Joi.string()),
+    description: Joi.string().allow('', null),
+    completion: Joi.number().min(0).max(100).default(0),
+    startDate: Joi.date().allow(null),
+    endDate: Joi.date().allow(null),
+    projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
+    mainContact: mainContactSchema,
+    techStack: Joi.array().items(Joi.string()),
   }),
 };
 
@@ -34,11 +47,18 @@ const updateProject = {
   body: Joi.object()
     .keys({
       name: Joi.string().max(150),
-      client: Joi.string(),
-      contractType: Joi.string().valid('Monthly Retainer', 'Per-Incident', 'Time & Material', 'Fixed'),
+      client: Joi.string().allow('', null),
+      contractType: Joi.string().valid('Monthly Retainer', 'Per-Incident', 'Time & Material', 'Fixed').allow(null),
       allocatedHours: Joi.number().min(0),
       members: Joi.array().items(Joi.string()),
       isActive: Joi.boolean(),
+      description: Joi.string().allow('', null),
+      completion: Joi.number().min(0).max(100),
+      startDate: Joi.date().allow(null),
+      endDate: Joi.date().allow(null),
+      projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
+      mainContact: mainContactSchema,
+      techStack: Joi.array().items(Joi.string()),
     })
     .min(1),
 };
