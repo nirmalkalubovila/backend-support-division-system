@@ -32,4 +32,28 @@ const resetPassword = {
   }),
 };
 
-module.exports = { login, logout, refreshTokens, forgotPassword, resetPassword };
+const updateMe = {
+  body: Joi.object().keys({
+    name: Joi.string().optional().max(100),
+    phone: Joi.string().optional().allow(null, ''),
+    designation: Joi.string().optional().allow(null, ''),
+    avatar: Joi.string().optional().allow(null, ''),
+  }),
+};
+
+const changePassword = {
+  body: Joi.object().keys({
+    currentPassword: Joi.string().required(),
+    newPassword: Joi.string().required().min(8),
+  }),
+};
+
+module.exports = {
+  login,
+  logout,
+  refreshTokens,
+  forgotPassword,
+  resetPassword,
+  updateMe,
+  changePassword,
+};

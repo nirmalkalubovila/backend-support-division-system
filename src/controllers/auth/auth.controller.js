@@ -39,4 +39,23 @@ const getMe = catchAsync(async (req, res) => {
   res.send(user);
 });
 
-module.exports = { login, logout, refreshTokens, forgotPassword, resetPassword, getMe };
+const updateMe = catchAsync(async (req, res) => {
+  const user = await userService.updateUserById(req.user._id, req.body);
+  res.send(user);
+});
+
+const changePassword = catchAsync(async (req, res) => {
+  await authService.changePassword(req.user._id, req.body.currentPassword, req.body.newPassword);
+  res.status(httpStatus.NO_CONTENT).send();
+});
+
+module.exports = {
+  login,
+  logout,
+  refreshTokens,
+  forgotPassword,
+  resetPassword,
+  getMe,
+  updateMe,
+  changePassword,
+};
