@@ -7,6 +7,7 @@ const reportService = require('./reports/report.service');
 const exportService = require('./reports/export.service');
 const clientService = require('./project-management/client.service');
 const projectService = require('./project-management/project.service');
+const taskService = require('./project-management/task.service');
 const issueService = require('./issue-management/issue.service');
 
 module.exports = {
@@ -19,5 +20,6 @@ module.exports = {
   exportService,
   clientService,
   projectService,
+  taskService,
   issueService,
 };
