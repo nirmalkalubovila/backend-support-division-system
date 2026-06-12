@@ -21,7 +21,10 @@ if (config.env !== 'test') {
 }
 
 // set security HTTP headers
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+// Serve static uploaded logo files
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // parse json request body
 app.use(express.json());

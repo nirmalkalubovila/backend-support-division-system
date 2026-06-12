@@ -80,9 +80,27 @@ const resetPassword = async (resetPasswordToken, newPassword) => {
   }
 };
 
+/**
+ * Change user password
+ * @param {ObjectId} userId
+ * @param {string} currentPassword
+ * @param {string} newPassword
+ * @returns {Promise<User>}
+ */
+const changePassword = async (userId, currentPassword, newPassword) => {
+  const user = await User.findById(userId);
+  if (!user || !(await user.isPasswordMatch(currentPassword))) {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Incorrect current password');
+  }
+  user.password = newPassword;
+  await user.save();
+  return user;
+};
+
 module.exports = {
   loginUserWithEmailAndPassword,
   logout,
   refreshAuth,
   resetPassword,
+  changePassword,
 };

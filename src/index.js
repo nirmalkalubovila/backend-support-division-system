@@ -2,6 +2,7 @@ const app = require('./app');
 const config = require('./config/config');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
+const { initReportJobs } = require('./jobs/report.job');
 
 let server;
 
@@ -13,6 +14,13 @@ const startServer = async () => {
   server = app.listen(config.port, () => {
     logger.info(`Server listening on port ${config.port} in ${config.env} mode`);
   });
+
+  // 3. Initialize scheduled report jobs
+  try {
+    await initReportJobs();
+  } catch (error) {
+    logger.warn('Failed to initialize report jobs', { error: error.message });
+  }
 };
 
 startServer();

@@ -10,10 +10,12 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// ── Issue Attachments Storage ──────────────────────────────────
+// ── Issue / Task Attachments Storage ───────────────────────────
 const issueStorage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(uploadsDir, 'issues');
+    const isTask = req.baseUrl && req.baseUrl.includes('/tasks');
+    const subDir = isTask ? 'tasks' : 'issues';
+    const dir = path.join(uploadsDir, subDir);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
   },

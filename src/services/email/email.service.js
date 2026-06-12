@@ -24,11 +24,11 @@ const sendEmail = async (to, subject, html) => {
  * Send reset password email
  */
 const sendResetPasswordEmail = async (to, token) => {
-  const subject = 'Reset your password — Prologics Support';
+  const subject = 'Reset your password — Support Division';
   const resetPasswordUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #6366f1;">Prologics Support Division</h2>
+      <h2 style="color: #6366f1;">Support Division</h2>
       <p>Hi,</p>
       <p>You requested a password reset. Click the button below to set a new password:</p>
       <p style="text-align: center; margin: 30px 0;">
@@ -49,10 +49,10 @@ const sendResetPasswordEmail = async (to, token) => {
 const sendNotificationEmail = async (to, subject, message) => {
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #6366f1;">Prologics Support Division</h2>
+      <h2 style="color: #6366f1;">Support Division</h2>
       <p>${message}</p>
       <hr style="border: 1px solid #e2e8f0; margin: 20px 0;">
-      <p style="color: #64748b; font-size: 12px;">This is an automated notification from the Prologics Support Division System.</p>
+      <p style="color: #64748b; font-size: 12px;">This is an automated notification from the Support Division System.</p>
     </div>
   `;
   await sendEmail(to, subject, html);

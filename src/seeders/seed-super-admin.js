@@ -4,7 +4,7 @@ const logger = require('../config/logger');
 const seedSuperAdmin = async () => {
   logger.info('Seeding Super Admin...');
 
-  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@prologics.lk';
+  const superAdminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@company.com';
   const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Admin@123456';
   const superAdminName = process.env.SUPER_ADMIN_NAME || 'Super Admin';
 

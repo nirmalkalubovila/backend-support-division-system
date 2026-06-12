@@ -13,5 +13,7 @@ router.post('/refresh-tokens', validate(authValidation.refreshTokens), activityL
 router.post('/forgot-password', validate(authValidation.forgotPassword), activityLogger('Forgot password request'), authController.forgotPassword);
 router.post('/reset-password', validate(authValidation.resetPassword), activityLogger('Reset password'), authController.resetPassword);
 router.get('/me', auth(), authController.getMe);
+router.patch('/me', auth(), validate(authValidation.updateMe), activityLogger('Update profile'), authController.updateMe);
+router.patch('/me/change-password', auth(), validate(authValidation.changePassword), activityLogger('Change password'), authController.changePassword);
 
 module.exports = router;
