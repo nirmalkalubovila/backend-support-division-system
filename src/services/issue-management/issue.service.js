@@ -79,7 +79,29 @@ const createIssue = async (issueBody, userId) => {
     status: issueBody.assignedTo ? 'Assigned' : 'Backlog',
   };
 
-  return Issue.create(issueData);
+  const issue = await Issue.create(issueData);
+
+  // Send notification if assigned on creation
+  if (issue.assignedTo) {
+    try {
+      const notificationService = require('../system/notification.service');
+      await notificationService.createNotification({
+        recipient: issue.assignedTo,
+        sender: userId,
+        title: 'New Issue Assigned',
+        message: `You have been assigned a new issue: ${issue.title} (${issue.issueId}).`,
+        type: 'info',
+        module: 'issues',
+        relatedId: issue._id,
+        relatedLink: `/issues?project=${issue.project}`,
+      });
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to trigger notification on issue creation', { error: err.message });
+    }
+  }
+
+  return issue;
 };
 
 const queryIssues = async (filter, options) => {
@@ -124,8 +146,47 @@ const updateIssueById = async (issueId, updateBody) => {
     updateBody.status = 'Assigned';
   }
 
+  const oldAssignee = issue.assignedTo ? String(issue.assignedTo._id || issue.assignedTo) : null;
+  const newAssignee = updateBody.assignedTo ? String(updateBody.assignedTo) : null;
+  const assigneeChanged = newAssignee && oldAssignee !== newAssignee;
+  const oldStatus = issue.status;
+  const statusChangedToReopened = updateBody.status === 'Reopened' && oldStatus !== 'Reopened';
+
   Object.assign(issue, updateBody);
   await issue.save();
+
+  // Send notifications
+  try {
+    const notificationService = require('../system/notification.service');
+    if (assigneeChanged) {
+      await notificationService.createNotification({
+        recipient: newAssignee,
+        title: 'Issue Assigned',
+        message: `You have been assigned the issue: ${issue.title} (${issue.issueId}).`,
+        type: 'info',
+        module: 'issues',
+        relatedId: issue._id,
+        relatedLink: `/issues?project=${issue.project}`,
+      });
+    }
+
+    if (statusChangedToReopened && issue.assignedTo) {
+      const recipientId = issue.assignedTo._id || issue.assignedTo;
+      await notificationService.createNotification({
+        recipient: recipientId,
+        title: 'Issue Reopened',
+        message: `The issue assigned to you has been reopened: ${issue.title} (${issue.issueId}).`,
+        type: 'warning',
+        module: 'issues',
+        relatedId: issue._id,
+        relatedLink: `/issues?project=${issue.project}`,
+      });
+    }
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to trigger notification on issue update', { error: err.message });
+  }
+
   return issue;
 };
 

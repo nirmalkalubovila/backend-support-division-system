@@ -12,6 +12,7 @@ const crService = require('./project-management/cr.service');
 const issueService = require('./issue-management/issue.service');
 const brandingService = require('./system/branding.service');
 const timeLogService = require('./time-tracking/time-log.service');
+const notificationService = require('./system/notification.service');
 
 module.exports = {
   authService,
@@ -28,4 +29,5 @@ module.exports = {
   issueService,
   brandingService,
   timeLogService,
+  notificationService,
 };

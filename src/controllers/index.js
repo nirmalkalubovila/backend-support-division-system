@@ -3,6 +3,7 @@ const userController = require('./user-management/user.controller');
 const settingController = require('./system/setting.controller');
 const reportController = require('./reports/report.controller');
 const timeLogController = require('./time-tracking/time-log.controller');
+const notificationController = require('./system/notification.controller');
 
 module.exports = {
   authController,
@@ -10,4 +11,5 @@ module.exports = {
   settingController,
   reportController,
   timeLogController,
+  notificationController,
 };
