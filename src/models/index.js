@@ -8,6 +8,7 @@ const Report = require('./reports/report.model');
 const Client = require('./project-management/client.model');
 const Project = require('./project-management/project.model');
 const Task = require('./project-management/task.model');
+const ChangeRequest = require('./project-management/cr.model');
 const Issue = require('./issue-management/issue.model');
 const Branding = require('./system/branding.model');
 
@@ -25,4 +26,5 @@ module.exports = {
   Task,
   Issue,
   Branding,
+  ChangeRequest,
 };
