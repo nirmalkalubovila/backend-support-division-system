@@ -28,7 +28,7 @@ const buildDailyData = async (date) => {
 
   // SLA compliance metrics
   const resolvedWithinSla = await Issue.countDocuments({
-    status: 'Resolved',
+    status: { $in: ['Resolved', 'Closed'] },
     updatedAt: { $gte: start, $lte: end },
     deletedAt: null,
     $expr: { $lte: ['$updatedAt', '$dueDate'] }
@@ -37,8 +37,8 @@ const buildDailyData = async (date) => {
   const breachedToday = await Issue.countDocuments({
     deletedAt: null,
     $or: [
-      { status: 'Resolved', updatedAt: { $gte: start, $lte: end }, $expr: { $gt: ['$updatedAt', '$dueDate'] } },
-      { status: { $ne: 'Resolved' }, dueDate: { $lt: end } }
+      { status: { $in: ['Resolved', 'Closed'] }, updatedAt: { $gte: start, $lte: end }, $expr: { $gt: ['$updatedAt', '$dueDate'] } },
+      { status: { $nin: ['Resolved', 'Closed'] }, dueDate: { $lt: end } }
     ]
   });
 
@@ -48,7 +48,8 @@ const buildDailyData = async (date) => {
     dueDate: { $gte: new Date(), $lte: moment().add(4, 'hours').toDate() }
   });
 
-  const complianceRate = resolvedToday > 0 ? parseFloat(((resolvedWithinSla / resolvedToday) * 100).toFixed(1)) : 100;
+  const totalCompletedToday = resolvedToday + closedToday;
+  const complianceRate = totalCompletedToday > 0 ? parseFloat(((resolvedWithinSla / totalCompletedToday) * 100).toFixed(1)) : 100;
 
   // Member Activity
   const memberActivityData = await TimeLog.aggregate([
@@ -174,19 +175,53 @@ const buildWeeklyData = async (weekStart) => {
   const byProject = await Issue.aggregate([
     {
       $match: {
-        createdAt: { $gte: start, $lte: end },
-        deletedAt: null
+        deletedAt: null,
+        $or: [
+          { createdAt: { $gte: start, $lte: end } },
+          { updatedAt: { $gte: start, $lte: end } }
+        ]
       }
     },
     {
       $group: {
         _id: '$project',
-        newIssues: { $sum: 1 },
+        newIssues: {
+          $sum: {
+            $cond: [
+              { $and: [
+                { $gte: ['$createdAt', start] },
+                { $lte: ['$createdAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
+        },
         resolved: {
-          $sum: { $cond: [{ $eq: ['$status', 'Resolved'] }, 1, 0] }
+          $sum: {
+            $cond: [
+              { $and: [
+                { $eq: ['$status', 'Resolved'] },
+                { $gte: ['$updatedAt', start] },
+                { $lte: ['$updatedAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
         },
         closed: {
-          $sum: { $cond: [{ $eq: ['$status', 'Closed'] }, 1, 0] }
+          $sum: {
+            $cond: [
+              { $and: [
+                { $eq: ['$status', 'Closed'] },
+                { $gte: ['$updatedAt', start] },
+                { $lte: ['$updatedAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
         }
       }
     },
@@ -232,7 +267,7 @@ const buildWeeklyData = async (weekStart) => {
 
   // Resolution Times
   const resolvedIssues = await Issue.find({
-    status: 'Resolved',
+    status: { $in: ['Resolved', 'Closed'] },
     updatedAt: { $gte: start, $lte: end },
     deletedAt: null
   });
@@ -277,7 +312,7 @@ const buildWeeklyData = async (weekStart) => {
   const priorStart = moment(start).subtract(7, 'days').toDate();
   const priorEnd = moment(end).subtract(7, 'days').toDate();
   const priorResolved = await Issue.find({
-    status: 'Resolved',
+    status: { $in: ['Resolved', 'Closed'] },
     updatedAt: { $gte: priorStart, $lte: priorEnd },
     deletedAt: null
   });
@@ -438,7 +473,7 @@ const buildMonthlyData = async (month, year) => {
 
   // Resolved issues
   const resolvedIssues = await Issue.find({
-    status: 'Resolved',
+    status: { $in: ['Resolved', 'Closed'] },
     updatedAt: { $gte: start, $lte: end },
     deletedAt: null
   });
@@ -491,7 +526,7 @@ const buildMonthlyData = async (month, year) => {
       createdAt: { $gte: start, $lte: end },
       deletedAt: null
     });
-    const resolved = clientIssues.filter(i => i.status === 'Resolved');
+    const resolved = clientIssues.filter(i => ['Resolved', 'Closed'].includes(i.status));
     const rate = clientIssues.length > 0 ? (resolved.length / clientIssues.length) * 100 : 100;
     const totalTime = resolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
     const avgHours = resolved.length > 0 ? totalTime / resolved.length : 0;
@@ -550,7 +585,7 @@ const buildMonthlyData = async (month, year) => {
     
     const resolved = await Issue.find({
       assignedTo: userId,
-      status: 'Resolved',
+      status: { $in: ['Resolved', 'Closed'] },
       updatedAt: { $gte: start, $lte: end },
       deletedAt: null
     });
@@ -579,7 +614,7 @@ const buildMonthlyData = async (month, year) => {
   const priorStart = new Date(year, month - 2, 1);
   const priorEnd = new Date(year, month - 1, 0, 23, 59, 59, 999);
   const priorResolved = await Issue.find({
-    status: 'Resolved',
+    status: { $in: ['Resolved', 'Closed'] },
     updatedAt: { $gte: priorStart, $lte: priorEnd },
     deletedAt: null
   });
@@ -661,20 +696,30 @@ const buildMonthlyData = async (month, year) => {
  */
 const buildExecutiveData = async (params) => {
   const { startDate, endDate, projectId, clientId } = params;
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const start = moment(startDate).startOf('day').toDate();
+  const end = moment(endDate).endOf('day').toDate();
 
-  const filter = {
-    createdAt: { $gte: start, $lte: end },
+  const baseFilter = {
     deletedAt: null
   };
-  if (projectId) filter.project = projectId;
-  if (clientId) filter.client = clientId;
+  if (projectId) baseFilter.project = projectId;
+  if (clientId) baseFilter.client = clientId;
 
-  const totalIssues = await Issue.countDocuments(filter);
-  const resolvedIssues = await Issue.countDocuments({ ...filter, status: 'Resolved' });
+  const totalIssues = await Issue.countDocuments({
+    ...baseFilter,
+    createdAt: { $gte: start, $lte: end }
+  });
+  const resolvedIssues = await Issue.countDocuments({
+    ...baseFilter,
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end }
+  });
 
-  const resolvedList = await Issue.find({ ...filter, status: 'Resolved' });
+  const resolvedList = await Issue.find({
+    ...baseFilter,
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end }
+  });
   const withinSla = resolvedList.filter(i => i.updatedAt <= i.dueDate).length;
   const slaComplianceRate = resolvedList.length > 0 ? parseFloat(((withinSla / resolvedList.length) * 100).toFixed(1)) : 100;
 
@@ -701,8 +746,13 @@ const buildExecutiveData = async (params) => {
   const activeProjects = await Project.find(projectQuery);
   const projectSummary = [];
   for (const proj of activeProjects) {
-    const projIssues = await Issue.find({ project: proj._id, createdAt: { $gte: start, $lte: end }, deletedAt: null });
-    const projResolved = projIssues.filter(i => i.status === 'Resolved');
+    const projIssuesCount = await Issue.countDocuments({ project: proj._id, createdAt: { $gte: start, $lte: end }, deletedAt: null });
+    const projResolved = await Issue.find({
+      project: proj._id,
+      status: { $in: ['Resolved', 'Closed'] },
+      updatedAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
     const projWithinSla = projResolved.filter(i => i.updatedAt <= i.dueDate).length;
     const projSlaRate = projResolved.length > 0 ? parseFloat(((projWithinSla / projResolved.length) * 100).toFixed(1)) : 100;
 
@@ -711,7 +761,7 @@ const buildExecutiveData = async (params) => {
 
     projectSummary.push({
       project: proj.name,
-      issues: projIssues.length,
+      issues: projIssuesCount,
       resolved: projResolved.length,
       hoursUsed: parseFloat(hoursUsed.toFixed(1)),
       allocated: proj.allocatedHours,
@@ -760,6 +810,10 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
   const current = moment(start);
   let index = 0;
 
+  let totalWithinSlaGlobal = 0;
+  let totalResolvedGlobal = 0;
+  let totalResolutionTimeGlobal = 0;
+
   while (current <= end) {
     let bucketStart, bucketEnd;
     if (granularity === 'day') {
@@ -777,7 +831,7 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
     }
 
     const issuesNew = await Issue.countDocuments({ createdAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
-    const resolved = await Issue.find({ status: 'Resolved', updatedAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const resolved = await Issue.find({ status: { $in: ['Resolved', 'Closed'] }, updatedAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
     const issuesResolved = resolved.length;
 
     const withinSla = resolved.filter(i => i.updatedAt <= i.dueDate).length;
@@ -788,6 +842,10 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
 
     const periodLogs = await TimeLog.find({ startTime: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
     const velocityAvg = periodLogs.length > 0 ? parseFloat((periodLogs.reduce((acc, l) => acc + l.duration, 0) / periodLogs.length).toFixed(1)) : 0;
+
+    totalWithinSlaGlobal += withinSla;
+    totalResolvedGlobal += issuesResolved;
+    totalResolutionTimeGlobal += totalTime;
 
     points.push({
       date: moment(bucketStart).format('YYYY-MM-DD'),
@@ -804,10 +862,9 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
 
   // Calculate aggregates
   const totalNewIssues = points.reduce((s, p) => s + p.issuesNew, 0);
-  const totalResolvedIssues = points.reduce((s, p) => s + p.issuesResolved, 0);
-  const pointsWithResolved = points.filter(p => p.issuesResolved > 0);
-  const avgResolutionTime = pointsWithResolved.length > 0 ? parseFloat((pointsWithResolved.reduce((s, p) => s + p.resolutionTimeAvg, 0) / pointsWithResolved.length).toFixed(1)) : 0;
-  const avgSlaRate = pointsWithResolved.length > 0 ? parseFloat((pointsWithResolved.reduce((s, p) => s + p.slaComplianceRate, 0) / pointsWithResolved.length).toFixed(1)) : 100;
+  const totalResolvedIssues = totalResolvedGlobal;
+  const avgResolutionTime = totalResolvedGlobal > 0 ? parseFloat((totalResolutionTimeGlobal / totalResolvedGlobal).toFixed(1)) : 0;
+  const avgSlaRate = totalResolvedGlobal > 0 ? parseFloat(((totalWithinSlaGlobal / totalResolvedGlobal) * 100).toFixed(1)) : 100;
 
   return {
     granularity,
@@ -831,8 +888,8 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
  * @returns {Promise<Object>}
  */
 const buildUtilizationData = async (startDate, endDate, projectId) => {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
+  const start = moment(startDate).startOf('day').toDate();
+  const end = moment(endDate).endOf('day').toDate();
 
   const filter = {
     startTime: { $gte: start, $lte: end },
@@ -846,7 +903,7 @@ const buildUtilizationData = async (startDate, endDate, projectId) => {
 
   const userLogs = {};
   for (const log of logs) {
-    if (!log.user) continue;
+    if (!log.user || !log.project) continue;
     const userId = log.user._id.toString();
     if (!userLogs[userId]) {
       userLogs[userId] = {
@@ -888,6 +945,7 @@ const buildUtilizationData = async (startDate, endDate, projectId) => {
 
   const projectLogs = {};
   for (const log of logs) {
+    if (!log.user || !log.project) continue;
     const projId = log.project._id.toString();
     if (!projectLogs[projId]) {
       projectLogs[projId] = {
@@ -937,15 +995,30 @@ const generateDailyReport = async (date, userId = null) => {
 
   const data = await buildDailyData(startOfDay);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'daily',
     periodStart: startOfDay,
     periodEnd: endOfDay,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'daily',
+      periodStart: startOfDay,
+      periodEnd: endOfDay,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Daily report generated for ${startOfDay.toISOString().split('T')[0]}`, { reportId: report._id });
   return report;
@@ -964,15 +1037,30 @@ const generateWeeklyReport = async (weekStart, userId = null) => {
 
   const data = await buildWeeklyData(start);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'weekly',
     periodStart: start,
     periodEnd: end,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'weekly',
+      periodStart: start,
+      periodEnd: end,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Weekly report generated for ${start.toISOString().split('T')[0]}`, { reportId: report._id });
   return report;
@@ -991,15 +1079,30 @@ const generateMonthlyReport = async (month, year, userId = null) => {
 
   const data = await buildMonthlyData(month, year);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'monthly',
     periodStart,
     periodEnd,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'monthly',
+      periodStart,
+      periodEnd,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Monthly report generated for ${year}-${String(month).padStart(2, '0')}`, { reportId: report._id });
   return report;
@@ -1076,13 +1179,24 @@ const getLatestReport = async (type, date) => {
     periodEnd.setDate(periodEnd.getDate() + 6);
   }
 
-  const report = await Report.findOne({
+  let report = await Report.findOne({
     type,
     periodStart: { $gte: periodStart },
     periodEnd: { $lte: new Date(periodEnd.getTime() + 86400000) },
     deletedAt: null,
     status: 'completed',
   }).sort({ createdAt: -1 });
+
+  const isCurrentPeriod = (type === 'daily' && moment(periodStart).isSame(moment(), 'day')) ||
+                          (type === 'weekly' && moment(periodStart).isSame(moment(), 'week'));
+
+  if (!report || isCurrentPeriod) {
+    if (type === 'daily') {
+      report = await generateDailyReport(periodStart);
+    } else if (type === 'weekly') {
+      report = await generateWeeklyReport(periodStart);
+    }
+  }
 
   return report;
 };
