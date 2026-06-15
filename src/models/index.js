@@ -11,6 +11,7 @@ const Task = require('./project-management/task.model');
 const ChangeRequest = require('./project-management/cr.model');
 const Issue = require('./issue-management/issue.model');
 const Branding = require('./system/branding.model');
+const TimeLog = require('./time-tracking/time-log.model');
 const Notification = require('./system/notification.model');
 
 module.exports = {
@@ -27,6 +28,7 @@ module.exports = {
   Task,
   Issue,
   Branding,
+  TimeLog,
   ChangeRequest,
   Notification,
 };

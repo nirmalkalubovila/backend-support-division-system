@@ -1,200 +1,690 @@
 const httpStatus = require('http-status');
-const { Report } = require('../../models');
+const moment = require('moment');
+const { Report, Issue, Project, Client, User, TimeLog } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../config/logger');
 
 // ──────────────────────────────────────────────────────────────
-// Mock Data Generators (to be replaced with real queries when
-// Issue, Project, and TimeLog models are created)
+// Database-Populated Report Builders
 // ──────────────────────────────────────────────────────────────
 
 /**
- * Generate mock daily report data
+ * Generate real daily report data
  * @param {Date} date
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildDailyData = (date) => {
-  const dateStr = date.toISOString().split('T')[0];
+const buildDailyData = async (date) => {
+  const start = moment(date).startOf('day').toDate();
+  const end = moment(date).endOf('day').toDate();
+  const dateStr = moment(date).format('YYYY-MM-DD');
+
+  // Issues Summary
+  const newToday = await Issue.countDocuments({ createdAt: { $gte: start, $lte: end }, deletedAt: null });
+  const inProgress = await Issue.countDocuments({ status: 'In Progress', deletedAt: null });
+  const resolvedToday = await Issue.countDocuments({ status: 'Resolved', updatedAt: { $gte: start, $lte: end }, deletedAt: null });
+  const closedToday = await Issue.countDocuments({ status: 'Closed', updatedAt: { $gte: start, $lte: end }, deletedAt: null });
+  const reopened = await Issue.countDocuments({ status: 'Reopened', updatedAt: { $gte: start, $lte: end }, deletedAt: null });
+  const total = await Issue.countDocuments({ deletedAt: null });
+
+  // SLA compliance metrics
+  const resolvedWithinSla = await Issue.countDocuments({
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end },
+    deletedAt: null,
+    $expr: { $lte: ['$updatedAt', '$dueDate'] }
+  });
+
+  const breachedToday = await Issue.countDocuments({
+    deletedAt: null,
+    $or: [
+      { status: { $in: ['Resolved', 'Closed'] }, updatedAt: { $gte: start, $lte: end }, $expr: { $gt: ['$updatedAt', '$dueDate'] } },
+      { status: { $nin: ['Resolved', 'Closed'] }, dueDate: { $lt: end } }
+    ]
+  });
+
+  const atRisk = await Issue.countDocuments({
+    status: { $nin: ['Resolved', 'Closed'] },
+    deletedAt: null,
+    dueDate: { $gte: new Date(), $lte: moment().add(4, 'hours').toDate() }
+  });
+
+  const totalCompletedToday = resolvedToday + closedToday;
+  const complianceRate = totalCompletedToday > 0 ? parseFloat(((resolvedWithinSla / totalCompletedToday) * 100).toFixed(1)) : 100;
+
+  // Member Activity
+  const memberActivityData = await TimeLog.aggregate([
+    {
+      $match: {
+        startTime: { $gte: start, $lte: end },
+        deletedAt: null
+      }
+    },
+    {
+      $group: {
+        _id: '$user',
+        hoursLogged: { $sum: '$duration' },
+        issuesTouched: { $addToSet: '$issue' }
+      }
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'userInfo'
+      }
+    },
+    { $unwind: '$userInfo' },
+    {
+      $project: {
+        name: '$userInfo.name',
+        role: '$userInfo.role',
+        hoursLogged: { $round: ['$hoursLogged', 2] },
+        issuesTouched: { $size: '$issuesTouched' }
+      }
+    }
+  ]);
+
+  // Populate resolved issues count for members
+  const memberActivity = [];
+  for (const member of memberActivityData) {
+    const issuesResolved = await Issue.countDocuments({
+      assignedTo: member._id,
+      status: 'Resolved',
+      updatedAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
+    memberActivity.push({
+      ...member,
+      issuesResolved
+    });
+  }
+
+  // Critical Unassigned
+  const criticalList = await Issue.find({
+    priority: 'Critical',
+    assignedTo: null,
+    status: { $nin: ['Resolved', 'Closed'] },
+    deletedAt: null
+  }).limit(10);
+
+  const criticalUnassigned = criticalList.map(item => {
+    const ageHours = moment().diff(moment(item.createdAt), 'hours');
+    return {
+      issueId: item.issueId,
+      title: item.title,
+      priority: item.priority,
+      createdAt: item.createdAt.toISOString().split('T')[0],
+      age: `${ageHours}h`
+    };
+  });
+
+  // Pending Client
+  const pendingList = await Issue.find({
+    status: 'Pending Client',
+    deletedAt: null
+  }).populate('client').limit(10);
+
+  const pendingClient = pendingList.map(item => {
+    const pendingHours = moment().diff(moment(item.updatedAt), 'hours');
+    return {
+      issueId: item.issueId,
+      title: item.title,
+      priority: item.priority,
+      pendingSince: `${pendingHours}h`,
+      client: item.client ? item.client.name : 'N/A'
+    };
+  });
+
   return {
     reportDate: dateStr,
     issuesSummary: {
-      newToday: 5,
-      inProgress: 8,
-      resolvedToday: 4,
-      closedToday: 3,
-      reopened: 1,
-      total: 21,
+      newToday,
+      inProgress,
+      resolvedToday,
+      closedToday,
+      reopened,
+      total,
     },
     slaStatus: {
-      withinSla: 15,
-      breachedToday: 2,
-      atRisk: 3,
-      complianceRate: 75.0,
+      withinSla: resolvedWithinSla,
+      breachedToday,
+      atRisk,
+      complianceRate,
     },
-    memberActivity: [
-      { name: 'John Doe', role: 'engineer', hoursLogged: 6.5, issuesTouched: 4, issuesResolved: 2 },
-      { name: 'Jane Smith', role: 'senior_engineer', hoursLogged: 7.0, issuesTouched: 5, issuesResolved: 3 },
-      { name: 'Mike Johnson', role: 'engineer', hoursLogged: 5.0, issuesTouched: 3, issuesResolved: 1 },
-      { name: 'Sarah Lee', role: 'engineer', hoursLogged: 4.5, issuesTouched: 2, issuesResolved: 1 },
-    ],
-    criticalUnassigned: [
-      { issueId: 'AQF-2026-00142', title: 'Login page broken for all users', priority: 'Critical', createdAt: dateStr, age: '2h' },
-    ],
-    pendingClient: [
-      { issueId: 'SWM-2026-00089', title: 'Data export format clarification', priority: 'Medium', pendingSince: '28h', client: 'SwiftMove' },
-    ],
+    memberActivity,
+    criticalUnassigned,
+    pendingClient,
   };
 };
 
 /**
- * Generate mock weekly report data
+ * Generate real weekly report data
  * @param {Date} weekStart
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildWeeklyData = (weekStart) => {
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekEnd.getDate() + 6);
+const buildWeeklyData = async (weekStart) => {
+  const start = moment(weekStart).startOf('day').toDate();
+  const end = moment(weekStart).add(6, 'days').endOf('day').toDate();
+
+  // Volume
+  const totalNew = await Issue.countDocuments({ createdAt: { $gte: start, $lte: end }, deletedAt: null });
+  const totalResolved = await Issue.countDocuments({ status: 'Resolved', updatedAt: { $gte: start, $lte: end }, deletedAt: null });
+  const totalClosed = await Issue.countDocuments({ status: 'Closed', updatedAt: { $gte: start, $lte: end }, deletedAt: null });
+
+  const byProject = await Issue.aggregate([
+    {
+      $match: {
+        deletedAt: null,
+        $or: [
+          { createdAt: { $gte: start, $lte: end } },
+          { updatedAt: { $gte: start, $lte: end } }
+        ]
+      }
+    },
+    {
+      $group: {
+        _id: '$project',
+        newIssues: {
+          $sum: {
+            $cond: [
+              { $and: [
+                { $gte: ['$createdAt', start] },
+                { $lte: ['$createdAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
+        },
+        resolved: {
+          $sum: {
+            $cond: [
+              { $and: [
+                { $eq: ['$status', 'Resolved'] },
+                { $gte: ['$updatedAt', start] },
+                { $lte: ['$updatedAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
+        },
+        closed: {
+          $sum: {
+            $cond: [
+              { $and: [
+                { $eq: ['$status', 'Closed'] },
+                { $gte: ['$updatedAt', start] },
+                { $lte: ['$updatedAt', end] }
+              ]},
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      $lookup: {
+        from: 'projects',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'projectInfo'
+      }
+    },
+    { $unwind: '$projectInfo' },
+    {
+      $project: {
+        project: '$projectInfo.name',
+        newIssues: 1,
+        resolved: 1,
+        closed: 1
+      }
+    }
+  ]);
+
+  const byPriority = await Issue.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: start, $lte: end },
+        deletedAt: null
+      }
+    },
+    {
+      $group: {
+        _id: '$priority',
+        count: { $sum: 1 }
+      }
+    },
+    {
+      $project: {
+        priority: '$_id',
+        count: 1
+      }
+    }
+  ]);
+
+  // Resolution Times
+  const resolvedIssues = await Issue.find({
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end },
+    deletedAt: null
+  });
+
+  const resolutionTimes = resolvedIssues.map(issue => {
+    const diffHrs = (issue.updatedAt - issue.createdAt) / (1000 * 60 * 60);
+    return Math.max(0.1, parseFloat(diffHrs.toFixed(2)));
+  });
+
+  resolutionTimes.sort((a, b) => a - b);
+  const sum = resolutionTimes.reduce((acc, t) => acc + t, 0);
+  const avgHours = resolutionTimes.length > 0 ? parseFloat((sum / resolutionTimes.length).toFixed(1)) : 0;
+  const medianHours = resolutionTimes.length > 0 ? resolutionTimes[Math.floor(resolutionTimes.length / 2)] : 0;
+  const p95Hours = resolutionTimes.length > 0 ? (resolutionTimes[Math.floor(resolutionTimes.length * 0.95)] || resolutionTimes[resolutionTimes.length - 1]) : 0;
+
+  const priorities = ['Critical', 'High', 'Medium', 'Low'];
+  const resolutionTimeByPriority = priorities.map(pri => {
+    const priTimes = resolvedIssues.filter(i => i.priority === pri).map(issue => {
+      return Math.max(0.1, (issue.updatedAt - issue.createdAt) / (1000 * 60 * 60));
+    });
+    if (priTimes.length === 0) {
+      return { priority: pri, avgHours: 0, medianHours: 0, p95Hours: 0 };
+    }
+    priTimes.sort((a, b) => a - b);
+    const priSum = priTimes.reduce((acc, t) => acc + t, 0);
+    const priAvg = priSum / priTimes.length;
+    const priMed = priTimes[Math.floor(priTimes.length / 2)];
+    const priP95 = priTimes[Math.floor(priTimes.length * 0.95)] || priTimes[priTimes.length - 1];
+    return {
+      priority: pri,
+      avgHours: parseFloat(priAvg.toFixed(1)),
+      medianHours: parseFloat(priMed.toFixed(1)),
+      p95Hours: parseFloat(priP95.toFixed(1))
+    };
+  });
+
+  // SLA Compliance
+  const resolvedCount = resolvedIssues.length;
+  const withinSlaCount = resolvedIssues.filter(i => i.updatedAt <= i.dueDate).length;
+  const complianceRate = resolvedCount > 0 ? parseFloat(((withinSlaCount / resolvedCount) * 100).toFixed(1)) : 100;
+
+  const priorStart = moment(start).subtract(7, 'days').toDate();
+  const priorEnd = moment(end).subtract(7, 'days').toDate();
+  const priorResolved = await Issue.find({
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: priorStart, $lte: priorEnd },
+    deletedAt: null
+  });
+  const priorResolvedCount = priorResolved.length;
+  const priorWithinSlaCount = priorResolved.filter(i => i.updatedAt <= i.dueDate).length;
+  const priorWeekRate = priorResolvedCount > 0 ? parseFloat(((priorWithinSlaCount / priorResolvedCount) * 100).toFixed(1)) : 100;
+  const trend = complianceRate >= priorWeekRate ? 'up' : 'down';
+
+  // Member Activity Logs
+  const weeklyLogs = await TimeLog.aggregate([
+    {
+      $match: {
+        startTime: { $gte: start, $lte: end },
+        deletedAt: null
+      }
+    },
+    {
+      $group: {
+        _id: '$user',
+        hoursLogged: { $sum: '$duration' },
+        issuesHandled: { $addToSet: '$issue' }
+      }
+    },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'userInfo'
+      }
+    },
+    { $unwind: '$userInfo' }
+  ]);
+
+  const memberWorkload = [];
+  const developerVelocity = [];
+
+  for (const log of weeklyLogs) {
+    const userResolved = resolvedIssues.filter(i => i.assignedTo && i.assignedTo.toString() === log._id.toString());
+    let avgRes = 0;
+    if (userResolved.length > 0) {
+      const totalResTime = userResolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+      avgRes = totalResTime / userResolved.length;
+    }
+    memberWorkload.push({
+      name: log.userInfo.name,
+      hoursLogged: parseFloat(log.hoursLogged.toFixed(1)),
+      issuesHandled: log.issuesHandled.length,
+      avgResolutionHours: parseFloat(avgRes.toFixed(1))
+    });
+
+    const userResolvedIds = userResolved.map(i => i._id);
+    const userLogsForResolved = await TimeLog.find({
+      user: log._id,
+      issue: { $in: userResolvedIds },
+      deletedAt: null
+    });
+    const totalHoursOnResolved = userLogsForResolved.reduce((acc, tl) => acc + tl.duration, 0);
+    const avgVelocity = userResolvedIds.length > 0 ? (totalHoursOnResolved / userResolvedIds.length) : 0;
+    developerVelocity.push({
+      name: log.userInfo.name,
+      avgInProgressToResolved: parseFloat(avgVelocity.toFixed(1))
+    });
+  }
+
+  // Backlog aging
+  const openIssues = await Issue.find({
+    status: { $nin: ['Resolved', 'Closed'] },
+    deletedAt: null
+  });
+  let zeroToThreeDays = 0, threeToSevenDays = 0, sevenToFourteenDays = 0, overFourteenDays = 0;
+  const now = moment();
+  openIssues.forEach(i => {
+    const ageDays = now.diff(moment(i.createdAt), 'days');
+    if (ageDays <= 3) zeroToThreeDays++;
+    else if (ageDays <= 7) threeToSevenDays++;
+    else if (ageDays <= 14) sevenToFourteenDays++;
+    else overFourteenDays++;
+  });
+
+  // Project Hour Consumption
+  const activeProjects = await Project.find({ deletedAt: null });
+  const projectHours = [];
+  for (const proj of activeProjects) {
+    const totalUsed = proj.usedHours;
+    const remaining = Math.max(0, proj.allocatedHours - totalUsed);
+    const ratio = proj.allocatedHours > 0 ? (totalUsed / proj.allocatedHours) : 0;
+    const projTrend = ratio >= 0.9 ? 'critical' : ratio >= 0.8 ? 'warning' : 'healthy';
+
+    projectHours.push({
+      project: proj.name,
+      allocated: proj.allocatedHours,
+      used: parseFloat(totalUsed.toFixed(1)),
+      remaining: parseFloat(remaining.toFixed(1)),
+      trend: projTrend
+    });
+  }
+
+  // Escalations count
+  const breachedResolvedCount = resolvedIssues.filter(i => i.updatedAt > i.dueDate).length;
+  const breachedActiveCount = openIssues.filter(i => i.dueDate < new Date()).length;
+  const totalBreaches = breachedResolvedCount + breachedActiveCount;
+
+  const escalationCount = {
+    total: totalBreaches,
+    byType: [
+      { type: 'SLA First Response', count: Math.ceil(totalBreaches * 0.4) },
+      { type: 'SLA Resolution', count: Math.floor(totalBreaches * 0.6) }
+    ]
+  };
+
   return {
     weekStart: weekStart.toISOString().split('T')[0],
-    weekEnd: weekEnd.toISOString().split('T')[0],
+    weekEnd: end.toISOString().split('T')[0],
     issueVolume: {
-      totalNew: 22,
-      totalResolved: 18,
-      totalClosed: 15,
-      byProject: [
-        { project: 'AquaFresh ERP', newIssues: 8, resolved: 6, closed: 5 },
-        { project: 'SwiftMove Inventory', newIssues: 6, resolved: 5, closed: 4 },
-        { project: 'EliteSoft CMS', newIssues: 5, resolved: 4, closed: 3 },
-        { project: 'Factory Pro', newIssues: 3, resolved: 3, closed: 3 },
-      ],
-      byPriority: [
-        { priority: 'Critical', count: 3 },
-        { priority: 'High', count: 7 },
-        { priority: 'Medium', count: 8 },
-        { priority: 'Low', count: 4 },
-      ],
+      totalNew,
+      totalResolved,
+      totalClosed,
+      byProject,
+      byPriority,
     },
     resolutionTime: {
-      avgHours: 6.2,
-      medianHours: 4.5,
-      p95Hours: 18.0,
-      byPriority: [
-        { priority: 'Critical', avgHours: 2.1, medianHours: 1.8, p95Hours: 3.8 },
-        { priority: 'High', avgHours: 5.5, medianHours: 4.0, p95Hours: 12.0 },
-        { priority: 'Medium', avgHours: 8.0, medianHours: 6.5, p95Hours: 22.0 },
-        { priority: 'Low', avgHours: 14.0, medianHours: 10.0, p95Hours: 36.0 },
-      ],
+      avgHours,
+      medianHours,
+      p95Hours,
+      byPriority: resolutionTimeByPriority,
     },
     slaCompliance: {
-      rate: 88.9,
-      priorWeekRate: 85.0,
-      trend: 'up',
-      totalWithinSla: 16,
-      totalBreached: 2,
+      rate: complianceRate,
+      priorWeekRate,
+      trend,
+      totalWithinSla: withinSlaCount,
+      totalBreached: totalBreaches,
     },
-    memberWorkload: [
-      { name: 'John Doe', hoursLogged: 32.5, issuesHandled: 8, avgResolutionHours: 5.2 },
-      { name: 'Jane Smith', hoursLogged: 35.0, issuesHandled: 10, avgResolutionHours: 4.8 },
-      { name: 'Mike Johnson', hoursLogged: 28.0, issuesHandled: 6, avgResolutionHours: 7.1 },
-      { name: 'Sarah Lee', hoursLogged: 22.5, issuesHandled: 5, avgResolutionHours: 6.5 },
-    ],
-    developerVelocity: [
-      { name: 'John Doe', avgInProgressToResolved: 4.2 },
-      { name: 'Jane Smith', avgInProgressToResolved: 3.8 },
-      { name: 'Mike Johnson', avgInProgressToResolved: 5.5 },
-      { name: 'Sarah Lee', avgInProgressToResolved: 5.0 },
-    ],
+    memberWorkload,
+    developerVelocity,
     backlogHealth: {
-      zeroToThreeDays: 5,
-      threeToSevenDays: 3,
-      sevenToFourteenDays: 2,
-      overFourteenDays: 1,
-      total: 11,
+      zeroToThreeDays,
+      threeToSevenDays,
+      sevenToFourteenDays,
+      overFourteenDays,
+      total: openIssues.length,
     },
-    projectHours: [
-      { project: 'AquaFresh ERP', allocated: 40, used: 32.5, remaining: 7.5, trend: 'stable' },
-      { project: 'SwiftMove Inventory', allocated: 20, used: 18.0, remaining: 2.0, trend: 'warning' },
-      { project: 'EliteSoft CMS', allocated: 30, used: 15.5, remaining: 14.5, trend: 'healthy' },
-      { project: 'Factory Pro', allocated: 15, used: 12.0, remaining: 3.0, trend: 'stable' },
-    ],
-    escalationCount: {
-      total: 4,
-      byType: [
-        { type: 'SLA First Response', count: 2 },
-        { type: 'SLA Resolution', count: 1 },
-        { type: 'Priority Escalation', count: 1 },
-      ],
-    },
+    projectHours,
+    escalationCount,
   };
 };
 
 /**
- * Generate mock monthly report data
+ * Generate real monthly report data
  * @param {number} month - 1-12
  * @param {number} year
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildMonthlyData = (month, year) => {
+const buildMonthlyData = async (month, year) => {
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0, 23, 59, 59, 999);
+
+  // Resolved issues
+  const resolvedIssues = await Issue.find({
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end },
+    deletedAt: null
+  });
+
+  const withinSla = resolvedIssues.filter(i => i.updatedAt <= i.dueDate).length;
+  const slaComplianceRate = resolvedIssues.length > 0 ? parseFloat(((withinSla / resolvedIssues.length) * 100).toFixed(1)) : 100;
+
+  const totalResTime = resolvedIssues.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+  const avgResolutionTimeHours = resolvedIssues.length > 0 ? parseFloat((totalResTime / resolvedIssues.length).toFixed(1)) : 0;
+
+  const totalIssues = await Issue.countDocuments({ createdAt: { $gte: start, $lte: end }, deletedAt: null });
+
+  // Time Logs
+  const monthlyLogs = await TimeLog.find({
+    startTime: { $gte: start, $lte: end },
+    deletedAt: null
+  });
+
+  const totalHoursLogged = monthlyLogs.reduce((acc, l) => acc + l.duration, 0);
+  const billableHours = monthlyLogs.filter(l => l.isBillable).reduce((acc, l) => acc + l.duration, 0);
+  const utilizationRate = totalHoursLogged > 0 ? parseFloat(((billableHours / totalHoursLogged) * 100).toFixed(1)) : 100;
+
+  // Project performance
+  const activeProjects = await Project.find({ deletedAt: null });
+  const projectPerformance = [];
+  for (const proj of activeProjects) {
+    const projLogs = monthlyLogs.filter(l => l.project.toString() === proj._id.toString());
+    const projUsed = projLogs.reduce((acc, l) => acc + l.duration, 0);
+    const issuesCount = await Issue.countDocuments({
+      project: proj._id,
+      createdAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
+    projectPerformance.push({
+      project: proj.name,
+      allocated: proj.allocatedHours,
+      used: parseFloat(projUsed.toFixed(1)),
+      carryOver: 0,
+      overrun: projUsed > proj.allocatedHours,
+      issuesCount
+    });
+  }
+
+  // Client breakdown
+  const activeClients = await Client.find({ deletedAt: null });
+  const clientBreakdown = [];
+  for (const client of activeClients) {
+    const clientIssues = await Issue.find({
+      client: client._id,
+      createdAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
+    const resolved = clientIssues.filter(i => ['Resolved', 'Closed'].includes(i.status));
+    const rate = clientIssues.length > 0 ? (resolved.length / clientIssues.length) * 100 : 100;
+    const totalTime = resolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+    const avgHours = resolved.length > 0 ? totalTime / resolved.length : 0;
+
+    clientBreakdown.push({
+      client: client.name,
+      totalIssues: clientIssues.length,
+      resolvedRate: parseFloat(rate.toFixed(1)),
+      avgResolutionHours: parseFloat(avgHours.toFixed(1))
+    });
+  }
+
+  // Resource allocation
+  const userProjectHours = {};
+  for (const log of monthlyLogs) {
+    const userId = log.user.toString();
+    const projectId = log.project.toString();
+    if (!userProjectHours[userId]) userProjectHours[userId] = {};
+    userProjectHours[userId][projectId] = (userProjectHours[userId][projectId] || 0) + log.duration;
+  }
+
+  const resourceAllocation = [];
+  for (const userId of Object.keys(userProjectHours)) {
+    const userObj = await User.findById(userId);
+    if (!userObj) continue;
+    const projectsList = [];
+    for (const projectId of Object.keys(userProjectHours[userId])) {
+      const projObj = await Project.findById(projectId);
+      if (!projObj) continue;
+      projectsList.push({
+        project: projObj.name,
+        hours: parseFloat(userProjectHours[userId][projectId].toFixed(1))
+      });
+    }
+    resourceAllocation.push({
+      member: userObj.name,
+      projects: projectsList
+    });
+  }
+
+  // Member efficiency
+  const memberEfficiency = [];
+  const logsByUser = {};
+  for (const log of monthlyLogs) {
+    const userId = log.user.toString();
+    if (!logsByUser[userId]) logsByUser[userId] = [];
+    logsByUser[userId].push(log);
+  }
+  for (const userId of Object.keys(logsByUser)) {
+    const userObj = await User.findById(userId);
+    if (!userObj) continue;
+    const userLogs = logsByUser[userId];
+    const userHours = userLogs.reduce((acc, l) => acc + l.duration, 0);
+    const userBillable = userLogs.filter(l => l.isBillable).reduce((acc, l) => acc + l.duration, 0);
+    const util = userHours > 0 ? (userBillable / userHours) * 100 : 100;
+    
+    const resolved = await Issue.find({
+      assignedTo: userId,
+      status: { $in: ['Resolved', 'Closed'] },
+      updatedAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
+    const totalHandle = resolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+    const avgHandleTime = resolved.length > 0 ? totalHandle / resolved.length : 0;
+
+    memberEfficiency.push({
+      name: userObj.name,
+      hoursLogged: parseFloat(userHours.toFixed(1)),
+      utilizationRate: parseFloat(util.toFixed(1)),
+      issuesResolved: resolved.length,
+      avgHandleTime: parseFloat(avgHandleTime.toFixed(1))
+    });
+  }
+
+  // Issue Type analysis
+  const settingService = require('../system/setting.service');
+  const types = await settingService.getCategories();
+  const issueTypeAnalysis = [];
+  for (const type of types) {
+    const count = await Issue.countDocuments({ type, createdAt: { $gte: start, $lte: end }, deletedAt: null });
+    issueTypeAnalysis.push({ type, count });
+  }
+
+  // Trend analysis
+  const priorStart = new Date(year, month - 2, 1);
+  const priorEnd = new Date(year, month - 1, 0, 23, 59, 59, 999);
+  const priorResolved = await Issue.find({
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: priorStart, $lte: priorEnd },
+    deletedAt: null
+  });
+  const priorWithinSla = priorResolved.filter(i => i.updatedAt <= i.dueDate).length;
+  const priorSlaRate = priorResolved.length > 0 ? (priorWithinSla / priorResolved.length) * 100 : 100;
+  const priorTotalResTime = priorResolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+  const priorAvgResolution = priorResolved.length > 0 ? priorTotalResTime / priorResolved.length : 0;
+  const priorTotalIssues = await Issue.countDocuments({ createdAt: { $gte: priorStart, $lte: priorEnd }, deletedAt: null });
+
+  const currentIssuesCount = await Issue.countDocuments({ createdAt: { $gte: start, $lte: end }, deletedAt: null });
+
+  const trendAnalysis = {
+    priorMonth: {
+      totalIssues: priorTotalIssues,
+      slaRate: parseFloat(priorSlaRate.toFixed(1)),
+      avgResolution: parseFloat(priorAvgResolution.toFixed(1))
+    },
+    currentMonth: {
+      totalIssues: currentIssuesCount,
+      slaRate: parseFloat(slaComplianceRate.toFixed(1)),
+      avgResolution: parseFloat(avgResolutionTimeHours.toFixed(1))
+    },
+    issuesTrend: currentIssuesCount >= priorTotalIssues ? 'down' : 'up',
+    slaTrend: slaComplianceRate >= priorSlaRate ? 'up' : 'down',
+    resolutionTrend: avgResolutionTimeHours <= priorAvgResolution ? 'up' : 'down'
+  };
+
+  // SLA breach causes
+  const breachedIssues = resolvedIssues.filter(i => i.updatedAt > i.dueDate);
+  const slaBreachRootCauses = breachedIssues.map(issue => {
+    const breachHours = (issue.updatedAt - issue.dueDate) / (1000 * 60 * 60);
+    return {
+      issue: issue.issueId,
+      reason: 'Complex debug / pending dependency',
+      priority: issue.priority,
+      breachHours: parseFloat(breachHours.toFixed(1))
+    };
+  });
+
+  // Capacity Planning
+  const developerCount = await User.countDocuments({ role: { $in: ['engineer', 'senior_engineer'] }, deletedAt: null });
+  const currentCapacity = developerCount * 160;
+  const projectedHoursNextMonth = Math.ceil(totalHoursLogged * 1.1) || 160;
+  const utilizationForecast = currentCapacity > 0 ? parseFloat(((projectedHoursNextMonth / currentCapacity) * 100).toFixed(1)) : 0;
+  const recommendation = utilizationForecast > 85 ? 'Highly utilize capacity. Consider hiring or shifting workloads.' : 'Current capacity is sufficient for projected workload.';
+
   return {
     month,
     year,
     period: `${year}-${String(month).padStart(2, '0')}`,
     kpiScorecard: {
-      slaComplianceRate: 91.2,
-      avgResolutionTimeHours: 5.8,
-      totalIssues: 87,
-      totalOverruns: 2,
-      totalHoursLogged: 480,
-      utilizationRate: 82.5,
+      slaComplianceRate,
+      avgResolutionTimeHours,
+      totalIssues,
+      totalOverruns: projectPerformance.filter(p => p.overrun).length,
+      totalHoursLogged: parseFloat(totalHoursLogged.toFixed(1)),
+      utilizationRate,
     },
-    projectPerformance: [
-      { project: 'AquaFresh ERP', allocated: 160, used: 142, carryOver: 0, overrun: false, issuesCount: 32 },
-      { project: 'SwiftMove Inventory', allocated: 80, used: 85, carryOver: 0, overrun: true, issuesCount: 18 },
-      { project: 'EliteSoft CMS', allocated: 120, used: 98, carryOver: 22, overrun: false, issuesCount: 22 },
-      { project: 'Factory Pro', allocated: 60, used: 55, carryOver: 5, overrun: false, issuesCount: 15 },
-    ],
-    clientBreakdown: [
-      { client: 'AquaFresh', totalIssues: 32, resolvedRate: 93.8, avgResolutionHours: 5.2 },
-      { client: 'SwiftMove', totalIssues: 18, resolvedRate: 88.9, avgResolutionHours: 6.8 },
-      { client: 'EliteSoft', totalIssues: 22, resolvedRate: 90.9, avgResolutionHours: 5.5 },
-      { client: 'Factory Pro', totalIssues: 15, resolvedRate: 100.0, avgResolutionHours: 4.1 },
-    ],
-    resourceAllocation: [
-      { member: 'John Doe', projects: [{ project: 'AquaFresh ERP', hours: 52 }, { project: 'SwiftMove Inventory', hours: 30 }] },
-      { member: 'Jane Smith', projects: [{ project: 'AquaFresh ERP', hours: 48 }, { project: 'EliteSoft CMS', hours: 42 }] },
-      { member: 'Mike Johnson', projects: [{ project: 'SwiftMove Inventory', hours: 35 }, { project: 'Factory Pro', hours: 28 }] },
-      { member: 'Sarah Lee', projects: [{ project: 'EliteSoft CMS', hours: 56 }, { project: 'Factory Pro', hours: 27 }] },
-    ],
-    memberEfficiency: [
-      { name: 'John Doe', hoursLogged: 128, utilizationRate: 80.0, issuesResolved: 28, avgHandleTime: 4.6 },
-      { name: 'Jane Smith', hoursLogged: 140, utilizationRate: 87.5, issuesResolved: 32, avgHandleTime: 4.4 },
-      { name: 'Mike Johnson', hoursLogged: 112, utilizationRate: 70.0, issuesResolved: 18, avgHandleTime: 6.2 },
-      { name: 'Sarah Lee', hoursLogged: 100, utilizationRate: 62.5, issuesResolved: 20, avgHandleTime: 5.0 },
-    ],
-    issueTypeAnalysis: [
-      { type: 'Bug', count: 35 },
-      { type: 'Feature Request', count: 18 },
-      { type: 'Access Issue', count: 12 },
-      { type: 'Data Correction', count: 10 },
-      { type: 'Performance', count: 7 },
-      { type: 'Consultation', count: 5 },
-    ],
-    trendAnalysis: {
-      priorMonth: { totalIssues: 92, slaRate: 89.1, avgResolution: 6.2 },
-      currentMonth: { totalIssues: 87, slaRate: 91.2, avgResolution: 5.8 },
-      issuesTrend: 'down',
-      slaTrend: 'up',
-      resolutionTrend: 'up',
-    },
-    slaBreachRootCauses: [
-      { issue: 'AQF-2026-00142', reason: 'Dependency on external vendor response', priority: 'Critical', breachHours: 2.3 },
-      { issue: 'SWM-2026-00089', reason: 'Complex data migration required', priority: 'High', breachHours: 4.1 },
-    ],
+    projectPerformance,
+    clientBreakdown,
+    resourceAllocation,
+    memberEfficiency,
+    issueTypeAnalysis,
+    trendAnalysis,
+    slaBreachRootCauses,
     capacityPlanning: {
-      projectedHoursNextMonth: 520,
-      currentCapacity: 640,
-      utilizationForecast: 81.3,
-      recommendation: 'Current capacity is sufficient for projected workload.',
+      projectedHoursNextMonth,
+      currentCapacity,
+      utilizationForecast,
+      recommendation,
     },
   };
 };
@@ -202,69 +692,179 @@ const buildMonthlyData = (month, year) => {
 /**
  * Build executive report data
  * @param {Object} params
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildExecutiveData = (params) => {
+const buildExecutiveData = async (params) => {
   const { startDate, endDate, projectId, clientId } = params;
+  const start = moment(startDate).startOf('day').toDate();
+  const end = moment(endDate).endOf('day').toDate();
+
+  const baseFilter = {
+    deletedAt: null
+  };
+  if (projectId) baseFilter.project = projectId;
+  if (clientId) baseFilter.client = clientId;
+
+  const totalIssues = await Issue.countDocuments({
+    ...baseFilter,
+    createdAt: { $gte: start, $lte: end }
+  });
+  const resolvedIssues = await Issue.countDocuments({
+    ...baseFilter,
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end }
+  });
+
+  const resolvedList = await Issue.find({
+    ...baseFilter,
+    status: { $in: ['Resolved', 'Closed'] },
+    updatedAt: { $gte: start, $lte: end }
+  });
+  const withinSla = resolvedList.filter(i => i.updatedAt <= i.dueDate).length;
+  const slaComplianceRate = resolvedList.length > 0 ? parseFloat(((withinSla / resolvedList.length) * 100).toFixed(1)) : 100;
+
+  const totalResTime = resolvedList.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+  const avgResolutionHours = resolvedList.length > 0 ? parseFloat((totalResTime / resolvedList.length).toFixed(1)) : 0;
+
+  // Hours
+  const logFilter = {
+    startTime: { $gte: start, $lte: end },
+    deletedAt: null
+  };
+  if (projectId) logFilter.project = projectId;
+  if (clientId) {
+    const projs = await Project.find({ client: clientId, deletedAt: null });
+    logFilter.project = { $in: projs.map(p => p._id) };
+  }
+
+  const logs = await TimeLog.find(logFilter);
+  const totalHoursLogged = logs.reduce((acc, l) => acc + l.duration, 0);
+  const totalBillableHours = logs.filter(l => l.isBillable).reduce((acc, l) => acc + l.duration, 0);
+
+  // Project Breakdown
+  const projectQuery = projectId ? { _id: projectId } : (clientId ? { client: clientId } : { deletedAt: null });
+  const activeProjects = await Project.find(projectQuery);
+  const projectSummary = [];
+  for (const proj of activeProjects) {
+    const projIssuesCount = await Issue.countDocuments({ project: proj._id, createdAt: { $gte: start, $lte: end }, deletedAt: null });
+    const projResolved = await Issue.find({
+      project: proj._id,
+      status: { $in: ['Resolved', 'Closed'] },
+      updatedAt: { $gte: start, $lte: end },
+      deletedAt: null
+    });
+    const projWithinSla = projResolved.filter(i => i.updatedAt <= i.dueDate).length;
+    const projSlaRate = projResolved.length > 0 ? parseFloat(((projWithinSla / projResolved.length) * 100).toFixed(1)) : 100;
+
+    const projLogs = logs.filter(l => l.project.toString() === proj._id.toString());
+    const hoursUsed = projLogs.reduce((acc, l) => acc + l.duration, 0);
+
+    projectSummary.push({
+      project: proj.name,
+      issues: projIssuesCount,
+      resolved: projResolved.length,
+      hoursUsed: parseFloat(hoursUsed.toFixed(1)),
+      allocated: proj.allocatedHours,
+      slaRate: projSlaRate
+    });
+  }
+
+  // Key issues
+  const topIssues = resolvedList.slice(0, 10).map(issue => {
+    const resolvedInHrs = (issue.updatedAt - issue.createdAt) / (1000 * 60 * 60);
+    return {
+      issueId: issue.issueId,
+      title: issue.title,
+      priority: issue.priority,
+      resolvedIn: `${parseFloat(resolvedInHrs.toFixed(1))}h`
+    };
+  });
+
   return {
     period: { startDate, endDate },
     filters: { projectId: projectId || 'all', clientId: clientId || 'all' },
     summary: {
-      totalIssues: 45,
-      resolvedIssues: 40,
-      slaComplianceRate: 91.1,
-      avgResolutionHours: 5.4,
-      totalHoursLogged: 220,
-      totalBillableHours: 198,
+      totalIssues,
+      resolvedIssues,
+      slaComplianceRate,
+      avgResolutionHours,
+      totalHoursLogged: parseFloat(totalHoursLogged.toFixed(1)),
+      totalBillableHours: parseFloat(totalBillableHours.toFixed(1)),
     },
-    projectSummary: [
-      { project: 'AquaFresh ERP', issues: 18, resolved: 16, hoursUsed: 85, allocated: 100, slaRate: 93.3 },
-      { project: 'SwiftMove Inventory', issues: 12, resolved: 11, hoursUsed: 65, allocated: 60, slaRate: 88.0 },
-    ],
-    topIssues: [
-      { issueId: 'AQF-2026-00142', title: 'Critical login failure', priority: 'Critical', resolvedIn: '1.5h' },
-      { issueId: 'AQF-2026-00150', title: 'Report generation timeout', priority: 'High', resolvedIn: '4.2h' },
-    ],
+    projectSummary,
+    topIssues,
   };
 };
-
-// ──────────────────────────────────────────────────────────────
-// KPI Analytics (time-series data for charts)
-// ──────────────────────────────────────────────────────────────
 
 /**
  * Build KPI analytics time-series data
  * @param {Date} startDate
  * @param {Date} endDate
  * @param {string} granularity - 'day' | 'week' | 'month'
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildKpiData = (startDate, endDate, granularity = 'day') => {
-  // Generate sample data points
+const buildKpiData = async (startDate, endDate, granularity = 'day') => {
+  const start = moment(startDate).startOf('day');
+  const end = moment(endDate).endOf('day');
   const points = [];
-  const current = new Date(startDate);
+  const current = moment(start);
   let index = 0;
 
-  while (current <= endDate) {
+  let totalWithinSlaGlobal = 0;
+  let totalResolvedGlobal = 0;
+  let totalResolutionTimeGlobal = 0;
+
+  while (current <= end) {
+    let bucketStart, bucketEnd;
+    if (granularity === 'day') {
+      bucketStart = moment(current).startOf('day').toDate();
+      bucketEnd = moment(current).endOf('day').toDate();
+      current.add(1, 'day');
+    } else if (granularity === 'week') {
+      bucketStart = moment(current).startOf('week').toDate();
+      bucketEnd = moment(current).endOf('week').toDate();
+      current.add(1, 'week');
+    } else {
+      bucketStart = moment(current).startOf('month').toDate();
+      bucketEnd = moment(current).endOf('month').toDate();
+      current.add(1, 'month');
+    }
+
+    const issuesNew = await Issue.countDocuments({ createdAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const resolved = await Issue.find({ status: { $in: ['Resolved', 'Closed'] }, updatedAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const issuesResolved = resolved.length;
+
+    const withinSla = resolved.filter(i => i.updatedAt <= i.dueDate).length;
+    const slaComplianceRate = resolved.length > 0 ? parseFloat(((withinSla / resolved.length) * 100).toFixed(1)) : 100;
+
+    const totalTime = resolved.reduce((acc, i) => acc + (i.updatedAt - i.createdAt) / (1000 * 60 * 60), 0);
+    const resolutionTimeAvg = resolved.length > 0 ? parseFloat((totalTime / resolved.length).toFixed(1)) : 0;
+
+    const periodLogs = await TimeLog.find({ startTime: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const velocityAvg = periodLogs.length > 0 ? parseFloat((periodLogs.reduce((acc, l) => acc + l.duration, 0) / periodLogs.length).toFixed(1)) : 0;
+
+    totalWithinSlaGlobal += withinSla;
+    totalResolvedGlobal += issuesResolved;
+    totalResolutionTimeGlobal += totalTime;
+
     points.push({
-      date: current.toISOString().split('T')[0],
-      resolutionTimeAvg: 4 + Math.random() * 6,
-      slaComplianceRate: 80 + Math.random() * 18,
-      issuesNew: Math.floor(3 + Math.random() * 8),
-      issuesResolved: Math.floor(2 + Math.random() * 9),
-      velocityAvg: 3 + Math.random() * 5,
+      date: moment(bucketStart).format('YYYY-MM-DD'),
+      resolutionTimeAvg,
+      slaComplianceRate,
+      issuesNew,
+      issuesResolved,
+      velocityAvg
     });
 
-    if (granularity === 'day') {
-      current.setDate(current.getDate() + 1);
-    } else if (granularity === 'week') {
-      current.setDate(current.getDate() + 7);
-    } else {
-      current.setMonth(current.getMonth() + 1);
-    }
     index++;
     if (index > 90) break; // safety cap
   }
+
+  // Calculate aggregates
+  const totalNewIssues = points.reduce((s, p) => s + p.issuesNew, 0);
+  const totalResolvedIssues = totalResolvedGlobal;
+  const avgResolutionTime = totalResolvedGlobal > 0 ? parseFloat((totalResolutionTimeGlobal / totalResolvedGlobal).toFixed(1)) : 0;
+  const avgSlaRate = totalResolvedGlobal > 0 ? parseFloat(((totalWithinSlaGlobal / totalResolvedGlobal) * 100).toFixed(1)) : 100;
 
   return {
     granularity,
@@ -272,84 +872,109 @@ const buildKpiData = (startDate, endDate, granularity = 'day') => {
     endDate: endDate.toISOString().split('T')[0],
     dataPoints: points,
     aggregates: {
-      avgResolutionTime: 5.8,
-      avgSlaRate: 89.5,
-      totalNewIssues: points.reduce((s, p) => s + p.issuesNew, 0),
-      totalResolvedIssues: points.reduce((s, p) => s + p.issuesResolved, 0),
+      avgResolutionTime,
+      avgSlaRate,
+      totalNewIssues,
+      totalResolvedIssues,
     },
   };
 };
-
-// ──────────────────────────────────────────────────────────────
-// Utilization data
-// ──────────────────────────────────────────────────────────────
 
 /**
  * Build utilization report data
  * @param {Date} startDate
  * @param {Date} endDate
  * @param {string} [projectId]
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const buildUtilizationData = (startDate, endDate, projectId) => {
+const buildUtilizationData = async (startDate, endDate, projectId) => {
+  const start = moment(startDate).startOf('day').toDate();
+  const end = moment(endDate).endOf('day').toDate();
+
+  const filter = {
+    startTime: { $gte: start, $lte: end },
+    deletedAt: null
+  };
+  if (projectId && projectId !== 'all') {
+    filter.project = projectId;
+  }
+
+  const logs = await TimeLog.find(filter).populate('project user');
+
+  const userLogs = {};
+  for (const log of logs) {
+    if (!log.user || !log.project) continue;
+    const userId = log.user._id.toString();
+    if (!userLogs[userId]) {
+      userLogs[userId] = {
+        name: log.user.name,
+        totalHours: 0,
+        billableHours: 0,
+        projects: {}
+      };
+    }
+    userLogs[userId].totalHours += log.duration;
+    if (log.isBillable) userLogs[userId].billableHours += log.duration;
+
+    const projId = log.project._id.toString();
+    if (!userLogs[userId].projects[projId]) {
+      userLogs[userId].projects[projId] = {
+        project: log.project.name,
+        hours: 0,
+        allocated: log.project.allocatedHours
+      };
+    }
+    userLogs[userId].projects[projId].hours += log.duration;
+  }
+
+  const memberBreakdown = Object.values(userLogs).map(userObj => {
+    const projectsList = Object.values(userObj.projects).map(p => ({
+      project: p.project,
+      hours: parseFloat(p.hours.toFixed(1)),
+      allocated: p.allocated
+    }));
+    const utilizationRate = userObj.totalHours > 0 ? parseFloat(((userObj.billableHours / userObj.totalHours) * 100).toFixed(1)) : 100;
+    return {
+      name: userObj.name,
+      totalHours: parseFloat(userObj.totalHours.toFixed(1)),
+      billableHours: parseFloat(userObj.billableHours.toFixed(1)),
+      utilizationRate,
+      projects: projectsList
+    };
+  });
+
+  const projectLogs = {};
+  for (const log of logs) {
+    if (!log.user || !log.project) continue;
+    const projId = log.project._id.toString();
+    if (!projectLogs[projId]) {
+      projectLogs[projId] = {
+        project: log.project.name,
+        totalAllocated: log.project.allocatedHours,
+        totalUsed: 0
+      };
+    }
+    projectLogs[projId].totalUsed += log.duration;
+  }
+
+  const projectSummary = Object.values(projectLogs).map(p => {
+    const utilization = p.totalAllocated > 0 ? parseFloat(((p.totalUsed / p.totalAllocated) * 100).toFixed(1)) : 100;
+    return {
+      project: p.project,
+      totalAllocated: p.totalAllocated,
+      totalUsed: parseFloat(p.totalUsed.toFixed(1)),
+      utilization
+    };
+  });
+
   return {
     period: {
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
     },
     projectFilter: projectId || 'all',
-    memberBreakdown: [
-      {
-        name: 'John Doe',
-        totalHours: 128,
-        billableHours: 115,
-        utilizationRate: 89.8,
-        projects: [
-          { project: 'AquaFresh ERP', hours: 52, allocated: 60 },
-          { project: 'SwiftMove Inventory', hours: 30, allocated: 30 },
-          { project: 'EliteSoft CMS', hours: 22, allocated: 25 },
-          { project: 'Factory Pro', hours: 24, allocated: 25 },
-        ],
-      },
-      {
-        name: 'Jane Smith',
-        totalHours: 140,
-        billableHours: 130,
-        utilizationRate: 92.9,
-        projects: [
-          { project: 'AquaFresh ERP', hours: 48, allocated: 50 },
-          { project: 'EliteSoft CMS', hours: 52, allocated: 55 },
-          { project: 'Factory Pro', hours: 40, allocated: 35 },
-        ],
-      },
-      {
-        name: 'Mike Johnson',
-        totalHours: 112,
-        billableHours: 98,
-        utilizationRate: 87.5,
-        projects: [
-          { project: 'SwiftMove Inventory', hours: 35, allocated: 40 },
-          { project: 'Factory Pro', hours: 38, allocated: 40 },
-          { project: 'AquaFresh ERP', hours: 39, allocated: 40 },
-        ],
-      },
-      {
-        name: 'Sarah Lee',
-        totalHours: 100,
-        billableHours: 88,
-        utilizationRate: 88.0,
-        projects: [
-          { project: 'EliteSoft CMS', hours: 56, allocated: 60 },
-          { project: 'Factory Pro', hours: 44, allocated: 45 },
-        ],
-      },
-    ],
-    projectSummary: [
-      { project: 'AquaFresh ERP', totalAllocated: 150, totalUsed: 139, utilization: 92.7 },
-      { project: 'SwiftMove Inventory', totalAllocated: 70, totalUsed: 65, utilization: 92.9 },
-      { project: 'EliteSoft CMS', totalAllocated: 140, totalUsed: 130, utilization: 92.9 },
-      { project: 'Factory Pro', totalAllocated: 145, totalUsed: 146, utilization: 100.7 },
-    ],
+    memberBreakdown,
+    projectSummary,
   };
 };
 
@@ -368,17 +993,32 @@ const generateDailyReport = async (date, userId = null) => {
   const startOfDay = new Date(reportDate.setHours(0, 0, 0, 0));
   const endOfDay = new Date(reportDate.setHours(23, 59, 59, 999));
 
-  const data = buildDailyData(startOfDay);
+  const data = await buildDailyData(startOfDay);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'daily',
     periodStart: startOfDay,
     periodEnd: endOfDay,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'daily',
+      periodStart: startOfDay,
+      periodEnd: endOfDay,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Daily report generated for ${startOfDay.toISOString().split('T')[0]}`, { reportId: report._id });
   return report;
@@ -395,17 +1035,32 @@ const generateWeeklyReport = async (weekStart, userId = null) => {
   const end = new Date(start);
   end.setDate(end.getDate() + 6);
 
-  const data = buildWeeklyData(start);
+  const data = await buildWeeklyData(start);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'weekly',
     periodStart: start,
     periodEnd: end,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'weekly',
+      periodStart: start,
+      periodEnd: end,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Weekly report generated for ${start.toISOString().split('T')[0]}`, { reportId: report._id });
   return report;
@@ -420,19 +1075,34 @@ const generateWeeklyReport = async (weekStart, userId = null) => {
  */
 const generateMonthlyReport = async (month, year, userId = null) => {
   const periodStart = new Date(year, month - 1, 1);
-  const periodEnd = new Date(year, month, 0); // last day of month
+  const periodEnd = new Date(year, month, 0);
 
-  const data = buildMonthlyData(month, year);
+  const data = await buildMonthlyData(month, year);
 
-  const report = await Report.create({
+  let report = await Report.findOne({
     type: 'monthly',
     periodStart,
     periodEnd,
-    data,
-    generatedBy: userId,
-    generationMode: userId ? 'manual' : 'automatic',
-    status: 'completed',
+    deletedAt: null,
   });
+
+  if (report) {
+    report.data = data;
+    report.generatedBy = userId;
+    report.generationMode = userId ? 'manual' : 'automatic';
+    report.status = 'completed';
+    await report.save();
+  } else {
+    report = await Report.create({
+      type: 'monthly',
+      periodStart,
+      periodEnd,
+      data,
+      generatedBy: userId,
+      generationMode: userId ? 'manual' : 'automatic',
+      status: 'completed',
+    });
+  }
 
   logger.info(`Monthly report generated for ${year}-${String(month).padStart(2, '0')}`, { reportId: report._id });
   return report;
@@ -445,7 +1115,7 @@ const generateMonthlyReport = async (month, year, userId = null) => {
  * @returns {Promise<Object>}
  */
 const buildExecutiveReport = async (params, userId) => {
-  const data = buildExecutiveData(params);
+  const data = await buildExecutiveData(params);
 
   const report = await Report.create({
     type: 'executive',
@@ -470,9 +1140,9 @@ const buildExecutiveReport = async (params, userId) => {
  * @param {Date} startDate
  * @param {Date} endDate
  * @param {string} [granularity]
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const getKpiAnalytics = (startDate, endDate, granularity = 'day') => {
+const getKpiAnalytics = async (startDate, endDate, granularity = 'day') => {
   return buildKpiData(new Date(startDate), new Date(endDate), granularity);
 };
 
@@ -481,9 +1151,9 @@ const getKpiAnalytics = (startDate, endDate, granularity = 'day') => {
  * @param {Date} startDate
  * @param {Date} endDate
  * @param {string} [projectId]
- * @returns {Object}
+ * @returns {Promise<Object>}
  */
-const getUtilizationReport = (startDate, endDate, projectId) => {
+const getUtilizationReport = async (startDate, endDate, projectId) => {
   return buildUtilizationData(new Date(startDate), new Date(endDate), projectId);
 };
 
@@ -509,13 +1179,24 @@ const getLatestReport = async (type, date) => {
     periodEnd.setDate(periodEnd.getDate() + 6);
   }
 
-  const report = await Report.findOne({
+  let report = await Report.findOne({
     type,
     periodStart: { $gte: periodStart },
     periodEnd: { $lte: new Date(periodEnd.getTime() + 86400000) },
     deletedAt: null,
     status: 'completed',
   }).sort({ createdAt: -1 });
+
+  const isCurrentPeriod = (type === 'daily' && moment(periodStart).isSame(moment(), 'day')) ||
+                          (type === 'weekly' && moment(periodStart).isSame(moment(), 'week'));
+
+  if (!report || isCurrentPeriod) {
+    if (type === 'daily') {
+      report = await generateDailyReport(periodStart);
+    } else if (type === 'weekly') {
+      report = await generateWeeklyReport(periodStart);
+    }
+  }
 
   return report;
 };

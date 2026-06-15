@@ -37,7 +37,6 @@ const issueSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['Bug', 'Feature Request', 'Access Issue', 'Data Correction', 'Performance', 'Consultation'],
       default: 'Bug',
     },
     status: {

@@ -31,29 +31,31 @@ const generateMonthlyReport = catchAsync(async (req, res) => {
 
 const getMonthlyReport = catchAsync(async (req, res) => {
   const { month, year } = req.query;
-  if (month && year) {
-    // Find the latest monthly report for the given month/year
-    const { Report } = require('../../models');
-    const periodStart = new Date(year, month - 1, 1);
-    const periodEnd = new Date(year, month, 0);
-    const report = await Report.findOne({
-      type: 'monthly',
-      periodStart: { $gte: periodStart },
-      periodEnd: { $lte: new Date(periodEnd.getTime() + 86400000) },
-      deletedAt: null,
-      status: 'completed',
-    }).sort({ createdAt: -1 });
-    res.send(report || { message: 'No monthly report found for this period.' });
-  } else {
-    // Return the latest monthly report
-    const { Report } = require('../../models');
-    const report = await Report.findOne({
-      type: 'monthly',
-      deletedAt: null,
-      status: 'completed',
-    }).sort({ createdAt: -1 });
-    res.send(report || { message: 'No monthly report available.' });
+  const currentMonth = new Date().getMonth() + 1;
+  const currentYear = new Date().getFullYear();
+
+  const targetMonth = month ? Number(month) : currentMonth;
+  const targetYear = year ? Number(year) : currentYear;
+
+  const { Report } = require('../../models');
+  const periodStart = new Date(targetYear, targetMonth - 1, 1);
+  const periodEnd = new Date(targetYear, targetMonth, 0);
+
+  let report = await Report.findOne({
+    type: 'monthly',
+    periodStart: { $gte: periodStart },
+    periodEnd: { $lte: new Date(periodEnd.getTime() + 86400000) },
+    deletedAt: null,
+    status: 'completed',
+  }).sort({ createdAt: -1 });
+
+  const isCurrentMonth = targetMonth === currentMonth && targetYear === currentYear;
+
+  if (!report || isCurrentMonth) {
+    report = await reportService.generateMonthlyReport(targetMonth, targetYear, req.user ? req.user._id : null);
   }
+
+  res.send(report);
 });
 
 const buildExecutiveReport = catchAsync(async (req, res) => {
@@ -63,13 +65,13 @@ const buildExecutiveReport = catchAsync(async (req, res) => {
 
 const getKpiAnalytics = catchAsync(async (req, res) => {
   const { startDate, endDate, granularity } = req.query;
-  const data = reportService.getKpiAnalytics(startDate, endDate, granularity);
+  const data = await reportService.getKpiAnalytics(startDate, endDate, granularity);
   res.send(data);
 });
 
 const getUtilizationReport = catchAsync(async (req, res) => {
   const { startDate, endDate, projectId } = req.query;
-  const data = reportService.getUtilizationReport(startDate, endDate, projectId);
+  const data = await reportService.getUtilizationReport(startDate, endDate, projectId);
   res.send(data);
 });
 

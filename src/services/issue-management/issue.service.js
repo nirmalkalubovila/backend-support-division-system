@@ -24,26 +24,22 @@ const generateIssueId = async (clientCode) => {
   return `${clientCode.code}-${currentYear}-${nextSequence}`;
 };
 
-/**
- * Calculate the Due Date based on priority SLA rules
- */
-const calculateSlaDueDate = (priority) => {
-  const now = moment();
-  switch (priority) {
-    case 'Critical':
-      return now.add(4, 'hours').toDate();
-    case 'High':
-      return now.add(24, 'hours').toDate(); // 1 day
-    case 'Medium':
-      return now.add(72, 'hours').toDate(); // 3 days
-    case 'Low':
-      return now.add(168, 'hours').toDate(); // 1 week
-    default:
-      return now.add(72, 'hours').toDate(); // default medium (3 days)
-  }
+const calculateSlaDueDate = async (priority) => {
+  const settingService = require('../system/setting.service');
+  const priorities = await settingService.getPriorities();
+  const config = priorities[priority] || priorities['Medium'];
+  const minutes = config ? config.resolution : 4320;
+  return moment().add(minutes, 'minutes').toDate();
 };
 
 const createIssue = async (issueBody, userId) => {
+  const settingService = require('../system/setting.service');
+  const categories = await settingService.getCategories();
+  const type = issueBody.type || 'Bug';
+  if (!categories.includes(type)) {
+    throw new ApiError(httpStatus.BAD_REQUEST, `Invalid issue type: ${type}`);
+  }
+
   const project = await Project.findOne({ _id: issueBody.project, deletedAt: null });
   if (!project) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
@@ -73,7 +69,7 @@ const createIssue = async (issueBody, userId) => {
   const issueId = await generateIssueId({ clientId: resolvedClientId, code: clientCode });
 
   // Calculate Due Date based on SLA rules
-  const dueDate = calculateSlaDueDate(issueBody.priority || 'Medium');
+  const dueDate = await calculateSlaDueDate(issueBody.priority || 'Medium');
 
   const issueData = {
     ...issueBody,
@@ -130,11 +126,19 @@ const getIssueByFormattedId = async (issueId) => {
 };
 
 const updateIssueById = async (issueId, updateBody) => {
+  if (updateBody.type) {
+    const settingService = require('../system/setting.service');
+    const categories = await settingService.getCategories();
+    if (!categories.includes(updateBody.type)) {
+      throw new ApiError(httpStatus.BAD_REQUEST, `Invalid issue type: ${updateBody.type}`);
+    }
+  }
+
   const issue = await getIssueById(issueId);
 
   // If priority changes, re-calculate the SLA due date
   if (updateBody.priority && updateBody.priority !== issue.priority) {
-    updateBody.dueDate = calculateSlaDueDate(updateBody.priority);
+    updateBody.dueDate = await calculateSlaDueDate(updateBody.priority);
   }
 
   // Update status changes assigned status automatically

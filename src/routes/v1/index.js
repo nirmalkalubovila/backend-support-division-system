@@ -9,6 +9,7 @@ const taskRoute = require('./projects/tasks/task.route');
 const crRoute = require('./projects/crs/cr.route');
 const issueRoute = require('./issues/issue.route');
 const systemRoute = require('./system/branding.route');
+const timeLogRoute = require('./time-tracking/time-log.route');
 const notificationRoute = require('./system/notification.route');
 
 const router = express.Router();
@@ -21,6 +22,7 @@ const defaultRoutes = [
   { path: '/clients',  route: clientRoute },
   { path: '/projects', route: projectRoute },
   { path: '/issues',   route: issueRoute },
+  { path: '/time-logs', route: timeLogRoute },
   { path: '/notifications', route: notificationRoute },
 ];
 

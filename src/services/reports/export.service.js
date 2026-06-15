@@ -1,7 +1,5 @@
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
-const { settingService } = require('../../services');
-const logger = require('../../config/logger');
 
 // ──────────────────────────────────────────────────────────────
 // PDF Export
@@ -13,6 +11,7 @@ const logger = require('../../config/logger');
  * @returns {Promise<Buffer>}
  */
 const exportReportAsPdf = async (report) => {
+  const { settingService } = require('../../services');
   const branding = await settingService.getBranding();
 
   return new Promise((resolve, reject) => {
@@ -219,6 +218,7 @@ function formatDate(d) {
  * @returns {Promise<Buffer>}
  */
 const exportReportAsExcel = async (report) => {
+  const { settingService } = require('../../services');
   const branding = await settingService.getBranding();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = branding.companyName || 'Prologics';
