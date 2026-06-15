@@ -8,6 +8,8 @@ const activityLogger = require('../../../../middlewares/activity-logger');
 
 const router = express.Router({ mergeParams: true });
 
+router.get('/workflow-rules', auth('projects.project.read'), taskController.getWorkflowRules);
+
 router
   .route('/')
   .get(auth('projects.project.read'), validate(taskValidation.getProjectTasks), taskController.getProjectTasks)
