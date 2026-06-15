@@ -9,7 +9,26 @@ const createUser = async (userBody) => {
   if (await User.isEmailTaken(userBody.email)) {
     throw new ApiError(httpStatus.CONFLICT, 'Email already taken');
   }
-  return User.create(userBody);
+
+  const rawPassword = userBody.password;
+  const user = await User.create(userBody);
+
+  // Send Welcome Email (non-blocking)
+  const config = require('../../config/config');
+  if (config.email.smtp.host && user.email) {
+    const emailService = require('../email/email.service');
+    const logger = require('../../config/logger');
+    Promise.resolve().then(async () => {
+      try {
+        await emailService.sendWelcomeEmail(user.email, user.name, user.email, rawPassword, user.role);
+        logger.info(`Welcome email sent to newly created user: ${user.email}`);
+      } catch (err) {
+        logger.warn(`Failed to send welcome email to new user ${user.email}: ${err.message}`);
+      }
+    });
+  }
+
+  return user;
 };
 
 /**

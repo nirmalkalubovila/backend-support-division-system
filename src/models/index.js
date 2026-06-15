@@ -11,6 +11,7 @@ const Task = require('./project-management/task.model');
 const ChangeRequest = require('./project-management/cr.model');
 const Issue = require('./issue-management/issue.model');
 const Branding = require('./system/branding.model');
+const Notification = require('./system/notification.model');
 
 module.exports = {
   User,
@@ -27,4 +28,5 @@ module.exports = {
   Issue,
   Branding,
   ChangeRequest,
+  Notification,
 };
