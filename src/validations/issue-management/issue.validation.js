@@ -4,7 +4,7 @@ const createIssue = {
   body: Joi.object().keys({
     title: Joi.string().required().max(150),
     description: Joi.string().required(),
-    client: Joi.string().required(),
+    client: Joi.string().allow(null, ''),
     project: Joi.string().required(),
     priority: Joi.string().valid('Critical', 'High', 'Medium', 'Low').default('Medium'),
     type: Joi.string().valid('Bug', 'Feature Request', 'Access Issue', 'Data Correction', 'Performance', 'Consultation').default('Bug'),
