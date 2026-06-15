@@ -11,6 +11,7 @@ const taskService = require('./project-management/task.service');
 const crService = require('./project-management/cr.service');
 const issueService = require('./issue-management/issue.service');
 const brandingService = require('./system/branding.service');
+const timeLogService = require('./time-tracking/time-log.service');
 
 module.exports = {
   authService,
@@ -26,4 +27,5 @@ module.exports = {
   crService,
   issueService,
   brandingService,
+  timeLogService,
 };

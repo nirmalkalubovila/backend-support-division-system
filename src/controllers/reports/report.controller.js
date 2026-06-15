@@ -63,13 +63,13 @@ const buildExecutiveReport = catchAsync(async (req, res) => {
 
 const getKpiAnalytics = catchAsync(async (req, res) => {
   const { startDate, endDate, granularity } = req.query;
-  const data = reportService.getKpiAnalytics(startDate, endDate, granularity);
+  const data = await reportService.getKpiAnalytics(startDate, endDate, granularity);
   res.send(data);
 });
 
 const getUtilizationReport = catchAsync(async (req, res) => {
   const { startDate, endDate, projectId } = req.query;
-  const data = reportService.getUtilizationReport(startDate, endDate, projectId);
+  const data = await reportService.getUtilizationReport(startDate, endDate, projectId);
   res.send(data);
 });
 

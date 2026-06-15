@@ -7,7 +7,7 @@ const createIssue = {
     client: Joi.string().allow(null, ''),
     project: Joi.string().required(),
     priority: Joi.string().valid('Critical', 'High', 'Medium', 'Low').default('Medium'),
-    type: Joi.string().valid('Bug', 'Feature Request', 'Access Issue', 'Data Correction', 'Performance', 'Consultation').default('Bug'),
+    type: Joi.string().default('Bug'),
     assignedTo: Joi.string().allow(null, ''),
     estimatedHours: Joi.number().min(0).allow(null),
   }),
@@ -19,7 +19,7 @@ const getIssues = {
     client: Joi.string(),
     project: Joi.string(),
     priority: Joi.string().valid('Critical', 'High', 'Medium', 'Low'),
-    type: Joi.string().valid('Bug', 'Feature Request', 'Access Issue', 'Data Correction', 'Performance', 'Consultation'),
+    type: Joi.string(),
     status: Joi.string().valid(
       'Backlog',
       'Assigned',
@@ -54,7 +54,7 @@ const updateIssue = {
       title: Joi.string().max(150),
       description: Joi.string(),
       priority: Joi.string().valid('Critical', 'High', 'Medium', 'Low'),
-      type: Joi.string().valid('Bug', 'Feature Request', 'Access Issue', 'Data Correction', 'Performance', 'Consultation'),
+      type: Joi.string(),
       status: Joi.string().valid(
         'Backlog',
         'Assigned',
