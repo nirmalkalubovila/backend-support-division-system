@@ -9,6 +9,7 @@ const taskRoute = require('./projects/tasks/task.route');
 const crRoute = require('./projects/crs/cr.route');
 const issueRoute = require('./issues/issue.route');
 const systemRoute = require('./system/branding.route');
+const notificationRoute = require('./system/notification.route');
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ const defaultRoutes = [
   { path: '/clients',  route: clientRoute },
   { path: '/projects', route: projectRoute },
   { path: '/issues',   route: issueRoute },
+  { path: '/notifications', route: notificationRoute },
 ];
 
 defaultRoutes.forEach((route) => {

@@ -48,12 +48,45 @@ const getCRById = async (crId) => {
 const updateCRById = async (crId, updateBody, userId) => {
   const cr = await getCRById(crId);
   const prevStatus = cr.status;
-  if (updateBody.status && updateBody.status !== prevStatus) {
+  const statusChanged = updateBody.status && updateBody.status !== prevStatus;
+
+  if (statusChanged) {
     cr.timeline.push({ fromStatus: prevStatus, toStatus: updateBody.status, changedBy: userId, note: updateBody.statusNote || null });
     delete updateBody.statusNote;
   }
   Object.assign(cr, updateBody);
   await cr.save();
+
+  // Send notifications if status changed
+  if (statusChanged) {
+    try {
+      const notificationService = require('../system/notification.service');
+      const recipients = new Set();
+      if (cr.createdBy) recipients.add(cr.createdBy.toString());
+      if (cr.assignedProjectManager) recipients.add(cr.assignedProjectManager.toString());
+      if (cr.assignedDevelopers) {
+        cr.assignedDevelopers.forEach((dev) => recipients.add(dev.toString()));
+      }
+      recipients.delete(String(userId));
+
+      for (const recipientId of recipients) {
+        await notificationService.createNotification({
+          recipient: recipientId,
+          sender: userId,
+          title: 'Change Request Status Updated',
+          message: `The Change Request "${cr.title}" (${cr.crNumber}) status has been updated from "${prevStatus}" to "${cr.status}".`,
+          type: cr.status === 'Approved' ? 'success' : cr.status === 'Rejected' ? 'error' : 'info',
+          module: 'crs',
+          relatedId: cr._id,
+          relatedLink: `/projects/${cr.project}`,
+        });
+      }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to trigger notification on CR update', { error: err.message });
+    }
+  }
+
   return cr.populate('assignedProjectManager assignedDevelopers createdBy', 'name email role avatar');
 };
 

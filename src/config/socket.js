@@ -38,6 +38,10 @@ const init = (httpServer) => {
   io.on('connection', (socket) => {
     logger.info(`WS connected: ${socket.id} (user=${socket.userId})`);
 
+    // Join a private room specific to this user to receive direct notifications
+    socket.join(`user:${socket.userId}`);
+    logger.info(`Socket ${socket.id} joined user:${socket.userId}`);
+
     // Client joins a project room to receive board updates
     socket.on('join:project', (projectId) => {
       socket.join(`project:${projectId}`);
