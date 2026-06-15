@@ -25,7 +25,6 @@ roleRights.set('engineer', [
 roleRights.set('senior_engineer', [
   ...roleRights.get('engineer'),
   'issues.issue.create',
-  'issues.issue.delete', // close
   'projects.project.read',
   'projects.client.read',
 ]);
@@ -61,6 +60,7 @@ roleRights.set('manager', [
 // Super Admin — everything
 roleRights.set('super_admin', [
   ...roleRights.get('manager'),
+  'issues.issue.delete',
   'system.settings.update',
   'system.settings.delete',
 ]);

@@ -2,6 +2,7 @@ const httpStatus = require('http-status');
 const catchAsync = require('../../utils/catchAsync');
 const { issueService } = require('../../services');
 const pick = require('../../utils/pick');
+const ApiError = require('../../utils/ApiError');
 
 const createIssue = catchAsync(async (req, res) => {
   const issue = await issueService.createIssue(req.body, req.user.id);
@@ -47,6 +48,18 @@ const getIssue = catchAsync(async (req, res) => {
 
 const updateIssue = catchAsync(async (req, res) => {
   // Find issue first to verify permissions if needed
+  const issueToUpdate = await issueService.getIssueById(req.params.issueId);
+
+  // Enforce that only super_admin can change status to 'Closed'
+  if (req.body.status === 'Closed' && req.user.role !== 'super_admin') {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only super admins can close issues');
+  }
+
+  // Also enforce that only super_admin can edit a 'Closed' issue
+  if (issueToUpdate.status === 'Closed' && req.user.role !== 'super_admin') {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Closed issues cannot be modified by non-super admins');
+  }
+
   const issue = await issueService.updateIssueById(req.params.issueId, req.body);
   res.send(issue);
 });

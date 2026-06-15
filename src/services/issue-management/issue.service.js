@@ -16,7 +16,7 @@ const generateIssueId = async (clientCode) => {
 
   // Count issues for this client in the current calendar year
   const clientIssuesCount = await Issue.countDocuments({
-    client: clientCode.clientId,
+    client: clientCode.clientId || null,
     createdAt: { $gte: startOfYear, $lte: endOfYear },
   });
 
@@ -44,18 +44,33 @@ const calculateSlaDueDate = (priority) => {
 };
 
 const createIssue = async (issueBody, userId) => {
-  const client = await Client.findOne({ _id: issueBody.client, deletedAt: null });
-  if (!client) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Client not found');
-  }
-
   const project = await Project.findOne({ _id: issueBody.project, deletedAt: null });
   if (!project) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
   }
 
+  // If client is not provided, resolve it from the project if available
+  let clientId = issueBody.client;
+  if (!clientId && project.client) {
+    clientId = project.client;
+  }
+
+  let clientCode = 'GEN';
+  let resolvedClientId = null;
+
+  if (clientId) {
+    const client = await Client.findOne({ _id: clientId, deletedAt: null });
+    if (client) {
+      resolvedClientId = client._id;
+      clientCode = client.code;
+    }
+  }
+
+  // Set the resolved client ID back to the issue body
+  issueBody.client = resolvedClientId;
+
   // Generate unique ID
-  const issueId = await generateIssueId({ clientId: client._id, code: client.code });
+  const issueId = await generateIssueId({ clientId: resolvedClientId, code: clientCode });
 
   // Calculate Due Date based on SLA rules
   const dueDate = calculateSlaDueDate(issueBody.priority || 'Medium');
