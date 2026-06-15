@@ -27,6 +27,7 @@ roleRights.set('senior_engineer', [
   'issues.issue.create',
   'projects.project.read',
   'projects.client.read',
+  'finance.payment.read',
 ]);
 
 // Manager / PM — full project + report + user access
@@ -55,6 +56,10 @@ roleRights.set('manager', [
   'user_management.user.read',
   'user_management.user.update',
   'user_management.user.delete',
+  'finance.payment.read',
+  'finance.payment.create',
+  'finance.payment.update',
+  'finance.payment.delete',
 ]);
 
 // Super Admin — everything
