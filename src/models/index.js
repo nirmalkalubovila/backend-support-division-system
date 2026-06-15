@@ -13,6 +13,7 @@ const Issue = require('./issue-management/issue.model');
 const Branding = require('./system/branding.model');
 const TimeLog = require('./time-tracking/time-log.model');
 const Notification = require('./system/notification.model');
+const Payment = require('./project-management/payment.model');
 
 module.exports = {
   User,
@@ -31,4 +32,5 @@ module.exports = {
   TimeLog,
   ChangeRequest,
   Notification,
+  Payment,
 };

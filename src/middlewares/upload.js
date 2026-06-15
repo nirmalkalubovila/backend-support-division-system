@@ -75,6 +75,25 @@ const uploadProjectPhoto = multer({
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
 });
 
+// ── Payment Attachment Storage ─────────────────────────────────
+const paymentStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(uploadsDir, 'payments');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
+  },
+});
+
+const uploadPaymentAttachment = multer({
+  storage: paymentStorage,
+  fileFilter: issueFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
+
 // Multer storage configuration for logo
 const logoStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -104,4 +123,5 @@ module.exports = {
   uploadIssueAttachments,
   uploadProjectPhoto,
   uploadLogo,
+  uploadPaymentAttachment,
 };
