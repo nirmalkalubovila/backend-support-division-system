@@ -3,9 +3,15 @@ const catchAsync = require('../../utils/catchAsync');
 const { issueService } = require('../../services');
 const pick = require('../../utils/pick');
 const ApiError = require('../../utils/ApiError');
+const { broadcast } = require('../../config/socket');
 
 const createIssue = catchAsync(async (req, res) => {
   const issue = await issueService.createIssue(req.body, req.user.id);
+  // Broadcast to all users in this project's room
+  if (issue.project) {
+    const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
+    broadcast(projectId, 'issue:created', issue);
+  }
   res.status(httpStatus.CREATED).send(issue);
 });
 
@@ -23,7 +29,6 @@ const getIssues = catchAsync(async (req, res) => {
   if (req.query.type) filter.type = req.query.type;
   if (req.query.status) filter.status = req.query.status;
 
-  // Role scope filtering
   if (req.user.role === 'engineer' || req.user.role === 'intern') {
     filter.assignedTo = req.user.id;
   } else if (req.query.assignedTo) {
@@ -36,7 +41,6 @@ const getIssues = catchAsync(async (req, res) => {
 });
 
 const getIssue = catchAsync(async (req, res) => {
-  // We can retrieve either by ObjectId or format ID (e.g. AQF-2026-00001)
   let issue;
   if (req.params.issueId.match(/^[0-9a-fA-F]{24}$/)) {
     issue = await issueService.getIssueById(req.params.issueId);
@@ -47,25 +51,26 @@ const getIssue = catchAsync(async (req, res) => {
 });
 
 const updateIssue = catchAsync(async (req, res) => {
-  // Find issue first to verify permissions if needed
   const issueToUpdate = await issueService.getIssueById(req.params.issueId);
 
-  // Enforce that only super_admin can change status to 'Closed'
   if (req.body.status === 'Closed' && req.user.role !== 'super_admin') {
     throw new ApiError(httpStatus.FORBIDDEN, 'Only super admins can close issues');
   }
-
-  // Also enforce that only super_admin can edit a 'Closed' issue
   if (issueToUpdate.status === 'Closed' && req.user.role !== 'super_admin') {
     throw new ApiError(httpStatus.FORBIDDEN, 'Closed issues cannot be modified by non-super admins');
   }
 
   const issue = await issueService.updateIssueById(req.params.issueId, req.body);
+  const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
+  broadcast(projectId, 'issue:updated', issue);
   res.send(issue);
 });
 
 const deleteIssue = catchAsync(async (req, res) => {
+  const issue = await issueService.getIssueById(req.params.issueId);
+  const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
   await issueService.deleteIssueById(req.params.issueId);
+  broadcast(projectId, 'issue:deleted', { _id: req.params.issueId });
   res.status(httpStatus.NO_CONTENT).send();
 });
 
@@ -74,11 +79,15 @@ const uploadAttachments = catchAsync(async (req, res) => {
     return res.status(httpStatus.BAD_REQUEST).send({ message: 'No files uploaded' });
   }
   const issue = await issueService.addAttachments(req.params.issueId, req.files, req.user.id);
+  const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
+  broadcast(projectId, 'issue:updated', issue);
   res.send(issue);
 });
 
 const deleteAttachment = catchAsync(async (req, res) => {
   const issue = await issueService.removeAttachment(req.params.issueId, req.params.attachmentId);
+  const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
+  broadcast(projectId, 'issue:updated', issue);
   res.send(issue);
 });
 

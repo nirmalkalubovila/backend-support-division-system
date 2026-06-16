@@ -29,4 +29,13 @@ router
   .route('/:crId/attachments/:attachmentId')
   .delete(auth('projects.project.update'), crController.deleteAttachment);
 
+router
+  .route('/:crId/tasks')
+  .get(auth('projects.project.read'), crController.getCRTasks)
+  .post(auth('projects.project.update'), activityLogger('Link task to CR'), crController.linkTask);
+
+router
+  .route('/:crId/tasks/:taskId')
+  .delete(auth('projects.project.update'), activityLogger('Unlink task from CR'), crController.unlinkTask);
+
 module.exports = router;
