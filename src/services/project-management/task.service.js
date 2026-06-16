@@ -3,6 +3,22 @@ const path = require('path');
 const { Task, Project } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
+// Recalculate and persist CR implementation progress after any task change
+const recalcCRProgress = async (crId) => {
+  if (!crId) return;
+  try {
+    const ChangeRequest = require('../../models/project-management/cr.model');
+    const tasks = await Task.find({ cr: crId, deletedAt: null }).select('status');
+    const total = tasks.length;
+    const done = tasks.filter((t) => t.status === 'Done').length;
+    const completionPercentage = total > 0 ? Math.round((done / total) * 100) : 0;
+    await ChangeRequest.findByIdAndUpdate(crId, { taskProgress: { total, done, completionPercentage } });
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to recalc CR progress', { error: err.message });
+  }
+};
+
 const createTask = async (taskBody) => {
   const project = await Project.findOne({ _id: taskBody.project, deletedAt: null });
   if (!project) throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
@@ -39,6 +55,7 @@ const getProjectTasks = async (projectId) => {
   const tasks = await Task.find({ project: projectId, deletedAt: null })
     .populate('assignees', 'name email role avatar')
     .populate('parent', 'name')
+    .populate('cr', 'crNumber title _id')
     .sort({ order: 1, createdAt: 1 });
   return tasks;
 };
@@ -46,7 +63,8 @@ const getProjectTasks = async (projectId) => {
 const getTaskById = async (taskId) => {
   const task = await Task.findOne({ _id: taskId, deletedAt: null })
     .populate('assignees', 'name email role avatar')
-    .populate('parent', 'name');
+    .populate('parent', 'name')
+    .populate('cr', 'crNumber title _id');
   if (!task) throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   return task;
 };
@@ -59,9 +77,16 @@ const updateTaskById = async (taskId, updateBody) => {
   Object.assign(task, updateBody);
   await task.save();
   await task.populate('assignees', 'name email role avatar');
+  await task.populate('cr', 'crNumber title _id');
 
   const newStatus = task.status;
   const statusChanged = oldStatus !== newStatus;
+
+  // Recalculate CR progress if this task is linked to a CR
+  if (task.cr) {
+    const crId = task.cr._id || task.cr;
+    await recalcCRProgress(crId);
+  }
 
   // Detect newly added assignees
   const currentAssignees = task.assignees.map((u) => u._id ? u._id.toString() : u.toString());
@@ -112,10 +137,12 @@ const updateTaskById = async (taskId, updateBody) => {
 
 const deleteTaskById = async (taskId) => {
   const task = await getTaskById(taskId);
+  const crId = task.cr ? (task.cr._id || task.cr) : null;
   task.deletedAt = new Date();
   await task.save();
   // Soft-delete all children too
   await Task.updateMany({ parent: taskId, deletedAt: null }, { deletedAt: new Date() });
+  if (crId) await recalcCRProgress(crId);
   return task;
 };
 
@@ -148,4 +175,5 @@ module.exports = {
   deleteTaskById,
   uploadTaskAttachment,
   deleteTaskAttachment,
+  recalcCRProgress,
 };
