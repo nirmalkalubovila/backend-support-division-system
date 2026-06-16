@@ -105,12 +105,12 @@ const createIssue = async (issueBody, userId) => {
 };
 
 const queryIssues = async (filter, options) => {
-  const issues = await Issue.paginate({ ...filter, deletedAt: null }, { ...options, populate: 'client,project,assignedTo,createdBy' });
+  const issues = await Issue.paginate({ ...filter, deletedAt: null }, { ...options, populate: 'client,project,assignedTo,createdBy,timeRequest.requestedBy' });
   return issues;
 };
 
 const getIssueById = async (id) => {
-  const issue = await Issue.findOne({ _id: id, deletedAt: null }).populate('client project assignedTo createdBy');
+  const issue = await Issue.findOne({ _id: id, deletedAt: null }).populate('client project assignedTo createdBy timeRequest.requestedBy');
   if (!issue) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
   }
@@ -118,14 +118,14 @@ const getIssueById = async (id) => {
 };
 
 const getIssueByFormattedId = async (issueId) => {
-  const issue = await Issue.findOne({ issueId, deletedAt: null }).populate('client project assignedTo createdBy');
+  const issue = await Issue.findOne({ issueId, deletedAt: null }).populate('client project assignedTo createdBy timeRequest.requestedBy');
   if (!issue) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
   }
   return issue;
 };
 
-const updateIssueById = async (issueId, updateBody) => {
+const updateIssueById = async (issueId, updateBody, updaterUser = null) => {
   if (updateBody.type) {
     const settingService = require('../system/setting.service');
     const categories = await settingService.getCategories();
@@ -135,6 +135,39 @@ const updateIssueById = async (issueId, updateBody) => {
   }
 
   const issue = await getIssueById(issueId);
+
+  // Extract expandReason if present
+  const expandReason = updateBody.expandReason;
+  delete updateBody.expandReason;
+
+  // Track time expansion
+  let timeExpanded = false;
+  let expandedByHours = 0;
+  if (updateBody.estimatedHours !== undefined && updateBody.estimatedHours !== null) {
+    const newEst = parseFloat(updateBody.estimatedHours);
+    const oldEst = issue.estimatedHours || 0;
+    if (newEst > oldEst) {
+      timeExpanded = true;
+      expandedByHours = newEst - oldEst;
+    }
+  }
+
+  // Handle time request payload
+  let timeRequested = false;
+  let timeRequestData = null;
+  if (updateBody.timeRequest) {
+    timeRequested = true;
+    timeRequestData = {
+      hours: parseFloat(updateBody.timeRequest.hours),
+      reason: updateBody.timeRequest.reason,
+      requestedBy: updaterUser ? updaterUser._id : null
+    };
+    issue.timeRequest = timeRequestData;
+    delete updateBody.timeRequest;
+  } else if (updateBody.timeRequest === null) {
+    issue.timeRequest = null;
+    delete updateBody.timeRequest;
+  }
 
   // If priority changes, re-calculate the SLA due date
   if (updateBody.priority && updateBody.priority !== issue.priority) {
@@ -158,6 +191,7 @@ const updateIssueById = async (issueId, updateBody) => {
   // Send notifications
   try {
     const notificationService = require('../system/notification.service');
+    const projectId = issue.project ? (issue.project._id || issue.project) : '';
     if (assigneeChanged) {
       await notificationService.createNotification({
         recipient: newAssignee,
@@ -166,7 +200,7 @@ const updateIssueById = async (issueId, updateBody) => {
         type: 'info',
         module: 'issues',
         relatedId: issue._id,
-        relatedLink: `/issues?project=${issue.project}`,
+        relatedLink: `/issues?project=${projectId}`,
       });
     }
 
@@ -179,8 +213,44 @@ const updateIssueById = async (issueId, updateBody) => {
         type: 'warning',
         module: 'issues',
         relatedId: issue._id,
-        relatedLink: `/issues?project=${issue.project}`,
+        relatedLink: `/issues?project=${projectId}`,
       });
+    }
+
+    // Notify Admins and Managers for Time Expansion
+    if (timeExpanded) {
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] } });
+      const updaterName = updaterUser ? updaterUser.name : 'An engineer';
+      for (const recipient of adminsAndManagers) {
+        if (updaterUser && String(recipient._id) === String(updaterUser._id)) continue;
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          title: `Time Expanded: ${issue.issueId}`,
+          message: `${updaterName} expanded the estimated hours for "${issue.title}" by +${expandedByHours.toFixed(1)} hrs. Reason: ${expandReason || 'No reason provided'}`,
+          type: 'info',
+          module: 'issues',
+          relatedId: issue._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
+    }
+
+    // Notify Admins and Managers for Time Request
+    if (timeRequested && timeRequestData) {
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] } });
+      const requesterName = updaterUser ? updaterUser.name : 'An engineer';
+      for (const recipient of adminsAndManagers) {
+        if (updaterUser && String(recipient._id) === String(updaterUser._id)) continue;
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          title: `Time Request: ${issue.issueId}`,
+          message: `${requesterName} requested a time extension of +${timeRequestData.hours.toFixed(1)} hrs for "${issue.title}". Reason: ${timeRequestData.reason}`,
+          type: 'warning',
+          module: 'issues',
+          relatedId: issue._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
     }
   } catch (err) {
     const logger = require('../../config/logger');

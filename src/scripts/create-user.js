@@ -1,8 +1,6 @@
-const mongoose = require('mongoose');
 const connectDB = require('../config/db');
 const { User } = require('../models');
 const { roles } = require('../config/roles');
-const logger = require('../config/logger');
 
 // Parse command line arguments
 const args = {};

@@ -88,6 +88,11 @@ const issueSchema = new mongoose.Schema(
         uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       },
     ],
+    timeRequest: {
+      hours: { type: Number, default: null },
+      reason: { type: String, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    },
     deletedAt: {
       type: Date,
       default: null,

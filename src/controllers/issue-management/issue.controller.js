@@ -60,7 +60,7 @@ const updateIssue = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Closed issues cannot be modified by non-super admins');
   }
 
-  const issue = await issueService.updateIssueById(req.params.issueId, req.body);
+  const issue = await issueService.updateIssueById(req.params.issueId, req.body, req.user);
   const projectId = typeof issue.project === 'object' ? String(issue.project._id) : String(issue.project);
   broadcast(projectId, 'issue:updated', issue);
   res.send(issue);

@@ -8,7 +8,6 @@ const projectRoute = require('./projects/project.route');
 const taskRoute = require('./projects/tasks/task.route');
 const crRoute = require('./projects/crs/cr.route');
 const issueRoute = require('./issues/issue.route');
-const systemRoute = require('./system/branding.route');
 const timeLogRoute = require('./time-tracking/time-log.route');
 const notificationRoute = require('./system/notification.route');
 const { router: paymentRoute, globalRouter: financeRoute } = require('./projects/payments/payment.route');

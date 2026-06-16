@@ -1,6 +1,4 @@
-const httpStatus = require('http-status');
 const { Setting } = require('../../models');
-const ApiError = require('../../utils/ApiError');
 
 /**
  * Get system branding settings
