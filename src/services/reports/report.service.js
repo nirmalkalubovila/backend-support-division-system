@@ -1,8 +1,193 @@
 const httpStatus = require('http-status');
 const moment = require('moment');
-const { Report, Issue, Project, Client, User, TimeLog } = require('../../models');
+const { Report, Issue, Project, Client, User, TimeLog, ChangeRequest, Task, Payment } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 const logger = require('../../config/logger');
+
+// ──────────────────────────────────────────────────────────────
+// Helpers for Change Requests, Tasks, and Finance
+// ──────────────────────────────────────────────────────────────
+
+const getCrSummary = async (start, end, projectId = null, clientId = null) => {
+  const filter = { deletedAt: null };
+  if (projectId) filter.project = projectId;
+  if (clientId) {
+    const projects = await Project.find({ client: clientId, deletedAt: null });
+    filter.project = { $in: projects.map(p => p._id) };
+  }
+
+  const dateFilter = {
+    $or: [
+      { createdAt: { $gte: start, $lte: end } },
+      { updatedAt: { $gte: start, $lte: end } }
+    ]
+  };
+
+  const crsInPeriod = await ChangeRequest.find({
+    ...filter,
+    ...dateFilter
+  }).populate('project');
+
+  const totalNew = crsInPeriod.filter(c => c.createdAt >= start && c.createdAt <= end).length;
+  const totalCompleted = crsInPeriod.filter(c => ['Completed', 'Closed'].includes(c.status) && c.updatedAt >= start && c.updatedAt <= end).length;
+
+  const statusBreakdown = {
+    Draft: 0, Submitted: 0, 'Under Review': 0, Approved: 0, Rejected: 0, 'In Development': 0, Testing: 0, Completed: 0, Closed: 0
+  };
+  const priorityBreakdown = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+  let totalEstimatedHours = 0;
+  let totalActualHours = 0;
+  let totalEstimatedCost = 0;
+
+  const projectMap = {};
+
+  crsInPeriod.forEach(c => {
+    if (statusBreakdown[c.status] !== undefined) statusBreakdown[c.status]++;
+    if (priorityBreakdown[c.priority] !== undefined) priorityBreakdown[c.priority]++;
+    totalEstimatedHours += c.estimatedHours || 0;
+    totalActualHours += c.actualHours || 0;
+    totalEstimatedCost += c.estimatedCost || 0;
+
+    const projName = c.project ? c.project.name : 'Unknown';
+    if (!projectMap[projName]) {
+      projectMap[projName] = { project: projName, new: 0, completed: 0, total: 0 };
+    }
+    projectMap[projName].total++;
+    if (c.createdAt >= start && c.createdAt <= end) projectMap[projName].new++;
+    if (['Completed', 'Closed'].includes(c.status) && c.updatedAt >= start && c.updatedAt <= end) projectMap[projName].completed++;
+  });
+
+  return {
+    totalNew,
+    totalCompleted,
+    totalCount: crsInPeriod.length,
+    totalEstimatedHours: parseFloat(totalEstimatedHours.toFixed(1)),
+    totalActualHours: parseFloat(totalActualHours.toFixed(1)),
+    totalEstimatedCost: parseFloat(totalEstimatedCost.toFixed(2)),
+    statusBreakdown,
+    priorityBreakdown,
+    byProject: Object.values(projectMap)
+  };
+};
+
+const getTaskSummary = async (start, end, projectId = null, clientId = null) => {
+  const filter = { deletedAt: null };
+  if (projectId) filter.project = projectId;
+  if (clientId) {
+    const projects = await Project.find({ client: clientId, deletedAt: null });
+    filter.project = { $in: projects.map(p => p._id) };
+  }
+
+  const dateFilter = {
+    $or: [
+      { createdAt: { $gte: start, $lte: end } },
+      { updatedAt: { $gte: start, $lte: end } }
+    ]
+  };
+
+  const tasksInPeriod = await Task.find({
+    ...filter,
+    ...dateFilter
+  }).populate('project');
+
+  const totalNew = tasksInPeriod.filter(t => t.createdAt >= start && t.createdAt <= end).length;
+  const totalCompleted = tasksInPeriod.filter(t => t.status === 'Done' && t.updatedAt >= start && t.updatedAt <= end).length;
+
+  const statusBreakdown = { 'To Do': 0, 'In Progress': 0, Review: 0, Done: 0 };
+  const priorityBreakdown = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+
+  const projectMap = {};
+
+  tasksInPeriod.forEach(t => {
+    if (statusBreakdown[t.status] !== undefined) statusBreakdown[t.status]++;
+    if (priorityBreakdown[t.priority] !== undefined) priorityBreakdown[t.priority]++;
+
+    const projName = t.project ? t.project.name : 'Unknown';
+    if (!projectMap[projName]) {
+      projectMap[projName] = { project: projName, new: 0, completed: 0, total: 0 };
+    }
+    projectMap[projName].total++;
+    if (t.createdAt >= start && t.createdAt <= end) projectMap[projName].new++;
+    if (t.status === 'Done' && t.updatedAt >= start && t.updatedAt <= end) projectMap[projName].completed++;
+  });
+
+  return {
+    totalNew,
+    totalCompleted,
+    totalCount: tasksInPeriod.length,
+    statusBreakdown,
+    priorityBreakdown,
+    byProject: Object.values(projectMap)
+  };
+};
+
+const getFinanceSummary = async (start, end, projectId = null, clientId = null) => {
+  const filter = { deletedAt: null };
+  if (projectId) filter.project = projectId;
+  if (clientId) {
+    const projects = await Project.find({ client: clientId, deletedAt: null });
+    filter.project = { $in: projects.map(p => p._id) };
+  }
+
+  const dateFilter = {
+    $or: [
+      { paymentDate: { $gte: start, $lte: end } },
+      { dueDate: { $gte: start, $lte: end } },
+      { createdAt: { $gte: start, $lte: end } }
+    ]
+  };
+
+  const paymentsInPeriod = await Payment.find({
+    ...filter,
+    ...dateFilter
+  }).populate('project');
+
+  let totalBilled = 0;
+  let totalReceived = 0;
+  let totalPartiallyPaid = 0;
+
+  const statusBreakdown = { Pending: 0, Paid: 0, 'Partially Paid': 0, Overdue: 0, Cancelled: 0 };
+  const projectMap = {};
+
+  paymentsInPeriod.forEach(p => {
+    if (statusBreakdown[p.paymentStatus] !== undefined) statusBreakdown[p.paymentStatus]++;
+    
+    totalBilled += p.totalAmount || 0;
+    if (p.paymentStatus === 'Paid') {
+      totalReceived += p.totalAmount || 0;
+    } else if (p.paymentStatus === 'Partially Paid') {
+      totalReceived += p.partiallyPaidAmount || 0;
+      totalPartiallyPaid += p.partiallyPaidAmount || 0;
+    }
+
+    const projName = p.project ? p.project.name : 'Unknown';
+    if (!projectMap[projName]) {
+      projectMap[projName] = { project: projName, billed: 0, received: 0, outstanding: 0 };
+    }
+    projectMap[projName].billed += p.totalAmount || 0;
+    if (p.paymentStatus === 'Paid') {
+      projectMap[projName].received += p.totalAmount || 0;
+    } else if (p.paymentStatus === 'Partially Paid') {
+      projectMap[projName].received += p.partiallyPaidAmount || 0;
+    }
+  });
+
+  const totalOutstanding = totalBilled - totalReceived;
+  Object.keys(projectMap).forEach(key => {
+    projectMap[key].outstanding = parseFloat((projectMap[key].billed - projectMap[key].received).toFixed(2));
+    projectMap[key].billed = parseFloat(projectMap[key].billed.toFixed(2));
+    projectMap[key].received = parseFloat(projectMap[key].received.toFixed(2));
+  });
+
+  return {
+    totalBilled: parseFloat(totalBilled.toFixed(2)),
+    totalReceived: parseFloat(totalReceived.toFixed(2)),
+    totalOutstanding: parseFloat(totalOutstanding.toFixed(2)),
+    totalPartiallyPaid: parseFloat(totalPartiallyPaid.toFixed(2)),
+    statusBreakdown,
+    byProject: Object.values(projectMap)
+  };
+};
 
 // ──────────────────────────────────────────────────────────────
 // Database-Populated Report Builders
@@ -136,6 +321,10 @@ const buildDailyData = async (date) => {
     };
   });
 
+  const changeRequests = await getCrSummary(start, end);
+  const tasks = await getTaskSummary(start, end);
+  const finance = await getFinanceSummary(start, end);
+
   return {
     reportDate: dateStr,
     issuesSummary: {
@@ -155,6 +344,9 @@ const buildDailyData = async (date) => {
     memberActivity,
     criticalUnassigned,
     pendingClient,
+    changeRequests,
+    tasks,
+    finance,
   };
 };
 
@@ -424,6 +616,10 @@ const buildWeeklyData = async (weekStart) => {
     ]
   };
 
+  const changeRequests = await getCrSummary(start, end);
+  const tasks = await getTaskSummary(start, end);
+  const finance = await getFinanceSummary(start, end);
+
   return {
     weekStart: weekStart.toISOString().split('T')[0],
     weekEnd: end.toISOString().split('T')[0],
@@ -661,6 +857,10 @@ const buildMonthlyData = async (month, year) => {
   const utilizationForecast = currentCapacity > 0 ? parseFloat(((projectedHoursNextMonth / currentCapacity) * 100).toFixed(1)) : 0;
   const recommendation = utilizationForecast > 85 ? 'Highly utilize capacity. Consider hiring or shifting workloads.' : 'Current capacity is sufficient for projected workload.';
 
+  const changeRequests = await getCrSummary(start, end);
+  const tasks = await getTaskSummary(start, end);
+  const finance = await getFinanceSummary(start, end);
+
   return {
     month,
     year,
@@ -686,6 +886,9 @@ const buildMonthlyData = async (month, year) => {
       utilizationForecast,
       recommendation,
     },
+    changeRequests,
+    tasks,
+    finance,
   };
 };
 
@@ -780,6 +983,10 @@ const buildExecutiveData = async (params) => {
     };
   });
 
+  const changeRequests = await getCrSummary(start, end, projectId, clientId);
+  const tasks = await getTaskSummary(start, end, projectId, clientId);
+  const finance = await getFinanceSummary(start, end, projectId, clientId);
+
   return {
     period: { startDate, endDate },
     filters: { projectId: projectId || 'all', clientId: clientId || 'all' },
@@ -793,6 +1000,9 @@ const buildExecutiveData = async (params) => {
     },
     projectSummary,
     topIssues,
+    changeRequests,
+    tasks,
+    finance,
   };
 };
 
@@ -813,6 +1023,13 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
   let totalWithinSlaGlobal = 0;
   let totalResolvedGlobal = 0;
   let totalResolutionTimeGlobal = 0;
+
+  let totalNewCrs = 0;
+  let totalCompletedCrs = 0;
+  let totalNewTasks = 0;
+  let totalCompletedTasks = 0;
+  let totalBilledRevenue = 0;
+  let totalReceivedRevenue = 0;
 
   while (current <= end) {
     let bucketStart, bucketEnd;
@@ -847,13 +1064,51 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
     totalResolvedGlobal += issuesResolved;
     totalResolutionTimeGlobal += totalTime;
 
+    // CRs trends
+    const crsNew = await ChangeRequest.countDocuments({ createdAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const crsCompleted = await ChangeRequest.countDocuments({ status: { $in: ['Completed', 'Closed'] }, updatedAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    totalNewCrs += crsNew;
+    totalCompletedCrs += crsCompleted;
+
+    // Tasks trends
+    const tasksNew = await Task.countDocuments({ createdAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    const tasksCompleted = await Task.countDocuments({ status: 'Done', updatedAt: { $gte: bucketStart, $lte: bucketEnd }, deletedAt: null });
+    totalNewTasks += tasksNew;
+    totalCompletedTasks += tasksCompleted;
+
+    // Finance trends
+    const payments = await Payment.find({
+      deletedAt: null,
+      $or: [
+        { paymentDate: { $gte: bucketStart, $lte: bucketEnd } },
+        { dueDate: { $gte: bucketStart, $lte: bucketEnd } },
+        { createdAt: { $gte: bucketStart, $lte: bucketEnd } }
+      ]
+    });
+    const revenueBilled = payments.reduce((s, p) => s + (p.totalAmount || 0), 0);
+    const revenueReceived = payments
+      .filter(p => p.paymentStatus === 'Paid')
+      .reduce((s, p) => s + (p.totalAmount || 0), 0) +
+      payments
+      .filter(p => p.paymentStatus === 'Partially Paid')
+      .reduce((s, p) => s + (p.partiallyPaidAmount || 0), 0);
+
+    totalBilledRevenue += revenueBilled;
+    totalReceivedRevenue += revenueReceived;
+
     points.push({
       date: moment(bucketStart).format('YYYY-MM-DD'),
       resolutionTimeAvg,
       slaComplianceRate,
       issuesNew,
       issuesResolved,
-      velocityAvg
+      velocityAvg,
+      crsNew,
+      crsCompleted,
+      tasksNew,
+      tasksCompleted,
+      revenueBilled: parseFloat(revenueBilled.toFixed(2)),
+      revenueReceived: parseFloat(revenueReceived.toFixed(2))
     });
 
     index++;
@@ -876,6 +1131,12 @@ const buildKpiData = async (startDate, endDate, granularity = 'day') => {
       avgSlaRate,
       totalNewIssues,
       totalResolvedIssues,
+      totalNewCrs,
+      totalCompletedCrs,
+      totalNewTasks,
+      totalCompletedTasks,
+      totalBilledRevenue: parseFloat(totalBilledRevenue.toFixed(2)),
+      totalReceivedRevenue: parseFloat(totalReceivedRevenue.toFixed(2))
     },
   };
 };
@@ -949,6 +1210,7 @@ const buildUtilizationData = async (startDate, endDate, projectId) => {
     const projId = log.project._id.toString();
     if (!projectLogs[projId]) {
       projectLogs[projId] = {
+        projectId: projId,
         project: log.project.name,
         totalAllocated: log.project.allocatedHours,
         totalUsed: 0
@@ -967,6 +1229,73 @@ const buildUtilizationData = async (startDate, endDate, projectId) => {
     };
   });
 
+  // 1. Developer Workload Comparison (Active Issues vs Active Tasks)
+  const activeIssues = await Issue.find({
+    status: { $nin: ['Resolved', 'Closed'] },
+    assignedTo: { $ne: null },
+    deletedAt: null
+  });
+  const activeTasks = await Task.find({
+    status: { $ne: 'Done' },
+    assignees: { $exists: true, $ne: [] },
+    deletedAt: null
+  });
+
+  const developerWorkloadCompare = [];
+  const users = await User.find({ role: { $in: ['engineer', 'senior_engineer'] }, deletedAt: null });
+  for (const u of users) {
+    const issuesCount = activeIssues.filter(i => i.assignedTo.toString() === u._id.toString()).length;
+    const tasksCount = activeTasks.filter(t => t.assignees.some(a => a.toString() === u._id.toString())).length;
+    developerWorkloadCompare.push({
+      name: u.name,
+      activeIssues: issuesCount,
+      activeTasks: tasksCount
+    });
+  }
+
+  // 2. Change Request Hours Breakdown (Project actual vs estimated hours)
+  const crQuery = { deletedAt: null };
+  if (projectId && projectId !== 'all') {
+    crQuery.project = projectId;
+  }
+  const crs = await ChangeRequest.find(crQuery).populate('project');
+  const crHoursMap = {};
+  crs.forEach(c => {
+    const projName = c.project ? c.project.name : 'Unknown';
+    if (!crHoursMap[projName]) {
+      crHoursMap[projName] = { project: projName, estimatedHours: 0, actualHours: 0 };
+    }
+    crHoursMap[projName].estimatedHours += c.estimatedHours || 0;
+    crHoursMap[projName].actualHours += c.actualHours || 0;
+  });
+  const crHoursBreakdown = Object.values(crHoursMap).map(c => ({
+    project: c.project,
+    estimatedHours: parseFloat(c.estimatedHours.toFixed(1)),
+    actualHours: parseFloat(c.actualHours.toFixed(1))
+  }));
+
+  // 3. Financial Billing Efficiency
+  const financialEfficiency = [];
+  for (const p of Object.values(projectLogs)) {
+    const payments = await Payment.find({ project: p.projectId, deletedAt: null });
+    const totalBilled = payments.reduce((sum, pay) => sum + (pay.totalAmount || 0), 0);
+    const totalReceived = payments
+      .filter(pay => pay.paymentStatus === 'Paid')
+      .reduce((sum, pay) => sum + (pay.totalAmount || 0), 0) +
+      payments
+      .filter(pay => pay.paymentStatus === 'Partially Paid')
+      .reduce((sum, pay) => sum + (pay.partiallyPaidAmount || 0), 0);
+    
+    const hourlyRate = p.totalUsed > 0 ? parseFloat((totalBilled / p.totalUsed).toFixed(2)) : 0;
+    financialEfficiency.push({
+      project: p.project,
+      totalBilled: parseFloat(totalBilled.toFixed(2)),
+      totalReceived: parseFloat(totalReceived.toFixed(2)),
+      totalUsedHours: parseFloat(p.totalUsed.toFixed(1)),
+      hourlyRate
+    });
+  }
+
   return {
     period: {
       startDate: startDate.toISOString().split('T')[0],
@@ -975,6 +1304,9 @@ const buildUtilizationData = async (startDate, endDate, projectId) => {
     projectFilter: projectId || 'all',
     memberBreakdown,
     projectSummary,
+    developerWorkloadCompare,
+    crHoursBreakdown,
+    financialEfficiency
   };
 };
 
