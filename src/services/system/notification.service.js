@@ -49,8 +49,62 @@ const createNotification = async (notificationBody) => {
     // Run asynchronously without awaiting so response isn't blocked
     Promise.resolve().then(async () => {
       try {
+        let project = null;
+        let dueDate = null;
+        let slaDuration = null;
+
+        if (relatedId) {
+          if (module === 'issues') {
+            const { Issue } = require('../../models');
+            const issue = await Issue.findById(relatedId).populate('project');
+            if (issue) {
+              project = issue.project ? issue.project.name : null;
+              dueDate = issue.dueDate;
+              
+              // Get SLA resolution time
+              const settingService = require('./setting.service');
+              const priorities = await settingService.getPriorities();
+              const prioConfig = priorities[issue.priority];
+              if (prioConfig && prioConfig.resolution) {
+                const resMinutes = prioConfig.resolution;
+                if (resMinutes < 60) {
+                  slaDuration = `${resMinutes} Minutes`;
+                } else {
+                  const hours = Math.round(resMinutes / 60);
+                  if (hours < 24) {
+                    slaDuration = `${hours} Hours`;
+                  } else {
+                    const days = Math.round(hours / 24);
+                    slaDuration = `${hours} Hours (${days} Days)`;
+                  }
+                }
+              }
+            }
+          } else if (module === 'tasks') {
+            const { Task } = require('../../models');
+            const task = await Task.findById(relatedId).populate('project');
+            if (task) {
+              project = task.project ? task.project.name : null;
+              dueDate = task.endDate;
+              slaDuration = task.priority ? `${task.priority} Priority` : null;
+            }
+          } else if (module === 'crs') {
+            const { ChangeRequest } = require('../../models');
+            const cr = await ChangeRequest.findById(relatedId).populate('project');
+            if (cr) {
+              project = cr.project ? cr.project.name : null;
+              dueDate = cr.targetReleaseDate;
+              slaDuration = cr.priority ? `${cr.priority} Priority` : null;
+            }
+          }
+        }
+
         const subject = `[Support Portal] ${title}`;
-        await emailService.sendNotificationEmail(recipientUser.email, subject, message);
+        await emailService.sendNotificationEmail(recipientUser.email, subject, title, message, relatedLink, type, {
+          project,
+          dueDate,
+          slaDuration,
+        });
         logger.info(`Notification email sent successfully to ${recipientUser.email}`);
       } catch (emailError) {
         logger.warn(`Failed to send notification email to ${recipientUser.email}: ${emailError.message}`);

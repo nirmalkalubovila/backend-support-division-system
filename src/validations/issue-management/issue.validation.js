@@ -69,7 +69,12 @@ const updateIssue = {
       ),
       assignedTo: Joi.string().allow(null, ''),
       estimatedHours: Joi.number().min(0).allow(null),
+      expandReason: Joi.string().allow(null, ''),
       technicalApproach: Joi.string().allow(null, ''),
+      timeRequest: Joi.object().keys({
+        hours: Joi.number().min(0.1).required(),
+        reason: Joi.string().required().max(1000),
+      }).allow(null),
     })
     .min(1),
 };
