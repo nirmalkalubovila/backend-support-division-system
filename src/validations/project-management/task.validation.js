@@ -13,6 +13,7 @@ const createTask = {
     relatedLinks: Joi.array().items(Joi.object({ label: Joi.string().allow(''), url: Joi.string().allow('') })),
     parent: Joi.string().allow(null),
     order: Joi.number().default(0),
+    cr: Joi.string().allow(null),
   }),
 };
 
@@ -37,6 +38,7 @@ const updateTask = {
     relatedLinks: Joi.array().items(Joi.object({ label: Joi.string().allow(''), url: Joi.string().allow('') })),
     parent: Joi.string().allow(null),
     order: Joi.number(),
+    cr: Joi.string().allow(null),
   }).min(1),
 };
 

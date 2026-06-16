@@ -65,6 +65,11 @@ const crSchema = new mongoose.Schema(
     timeline: [crTimelineEventSchema],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     order: { type: Number, default: 0 },
+    taskProgress: {
+      total: { type: Number, default: 0 },
+      done: { type: Number, default: 0 },
+      completionPercentage: { type: Number, default: 0 },
+    },
     deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
