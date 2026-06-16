@@ -27,6 +27,11 @@ const taskSchema = new mongoose.Schema(
       ref: 'Task',
       default: null,
     },
+    cr: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChangeRequest',
+      default: null,
+    },
     name: {
       type: String,
       required: true,
