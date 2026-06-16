@@ -1,6 +1,7 @@
 const httpStatus = require('http-status');
 const catchAsync = require('../../utils/catchAsync');
 const pick = require('../../utils/pick');
+const ApiError = require('../../utils/ApiError');
 const crService = require('../../services/project-management/cr.service');
 const { broadcast } = require('../../config/socket');
 
@@ -77,6 +78,7 @@ const linkTask = catchAsync(async (req, res) => {
   if (!taskId) throw new ApiError(httpStatus.BAD_REQUEST, 'taskId is required');
   const taskService = require('../../services/project-management/task.service');
   const task = await taskService.getTaskById(taskId);
+  if (!task) throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   await taskService.updateTaskById(taskId, { cr: req.params.crId });
   await taskService.recalcCRProgress(req.params.crId);
   const cr = await crService.getCRById(req.params.crId);
@@ -98,7 +100,6 @@ const unlinkTask = catchAsync(async (req, res) => {
 
 // Get all tasks linked to a CR
 const getCRTasks = catchAsync(async (req, res) => {
-  const taskService = require('../../services/project-management/task.service');
   const { Task } = require('../../models');
   const tasks = await Task.find({ cr: req.params.crId, deletedAt: null })
     .populate('assignees', 'name email role avatar')

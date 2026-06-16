@@ -1,5 +1,4 @@
 const httpStatus = require('http-status');
-const path = require('path');
 const catchAsync = require('../../utils/catchAsync');
 const ApiError = require('../../utils/ApiError');
 const taskService = require('../../services/project-management/task.service');
