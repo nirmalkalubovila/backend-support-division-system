@@ -28,6 +28,35 @@ const createTask = async (taskBody) => {
   }
   const task = await Task.create(taskBody);
 
+  // D2: If this is a sub-task, notify the parent task assignees
+  if (task.parent) {
+    try {
+      const notificationService = require('../system/notification.service');
+      const parentTask = await Task.findOne({ _id: task.parent, deletedAt: null }).populate('assignees', '_id');
+      if (parentTask && parentTask.assignees && parentTask.assignees.length > 0) {
+        for (const assignee of parentTask.assignees) {
+          const assigneeId = assignee._id || assignee;
+          // Don't notify if the parent assignee is also an assignee of this sub-task
+          const subTaskAssigneeIds = (task.assignees || []).map((a) => String(a));
+          if (subTaskAssigneeIds.includes(String(assigneeId))) continue;
+          await notificationService.createNotification({
+            recipient: assigneeId,
+            title: 'Sub-Task Added',
+            message: `New sub-task "${task.name}" has been added to your task "${parentTask.name}".`,
+            type: 'info',
+            module: 'tasks',
+            relatedId: task._id,
+            relatedLink: `/projects/${task.project}`,
+          });
+        }
+      }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to send sub-task notification', { error: err.message });
+    }
+  }
+
+  // D1: Notify task assignees
   if (task.assignees && task.assignees.length > 0) {
     try {
       const notificationService = require('../system/notification.service');

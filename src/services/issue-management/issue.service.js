@@ -81,10 +81,29 @@ const createIssue = async (issueBody, userId) => {
 
   const issue = await Issue.create(issueData);
 
-  // Send notification if assigned on creation
-  if (issue.assignedTo) {
-    try {
-      const notificationService = require('../system/notification.service');
+  // Send notifications for new issue creation
+  try {
+    const notificationService = require('../system/notification.service');
+    const projectLink = `/issues?project=${issue.project}`;
+
+    // A1: Notify the project manager / lead (admins & managers) about the new issue
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+    for (const recipient of adminsAndManagers) {
+      if (String(recipient._id) === String(userId)) continue;
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'New Issue Created',
+        message: `New issue "${issue.title}" (${issue.issueId}) has been created under project "${project.name}".`,
+        type: 'info',
+        module: 'issues',
+        relatedId: issue._id,
+        relatedLink: projectLink,
+      });
+    }
+
+    // A2: Notify assigned developer if assigned on creation
+    if (issue.assignedTo) {
       await notificationService.createNotification({
         recipient: issue.assignedTo,
         sender: userId,
@@ -93,12 +112,12 @@ const createIssue = async (issueBody, userId) => {
         type: 'info',
         module: 'issues',
         relatedId: issue._id,
-        relatedLink: `/issues?project=${issue.project}`,
+        relatedLink: projectLink,
       });
-    } catch (err) {
-      const logger = require('../../config/logger');
-      logger.error('Failed to trigger notification on issue creation', { error: err.message });
     }
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to trigger notification on issue creation', { error: err.message });
   }
 
   return issue;
@@ -106,6 +125,24 @@ const createIssue = async (issueBody, userId) => {
 
 const queryIssues = async (filter, options) => {
   const issues = await Issue.paginate({ ...filter, deletedAt: null }, { ...options, populate: 'client,project,assignedTo,createdBy,timeRequest.requestedBy' });
+  
+  // Calculate total time spent for each issue
+  const { TimeLog } = require('../../models');
+  const issueIds = issues.data.map(issue => issue._id);
+  const timeLogs = await TimeLog.aggregate([
+    { $match: { issue: { $in: issueIds }, deletedAt: null } },
+    { $group: { _id: '$issue', totalHours: { $sum: '$duration' } } }
+  ]);
+  
+  const timeLogMap = timeLogs.reduce((acc, log) => {
+    acc[log._id.toString()] = parseFloat((log.totalHours || 0).toFixed(2));
+    return acc;
+  }, {});
+
+  issues.data.forEach(issue => {
+    issue.totalTimeSpent = timeLogMap[issue._id.toString()] || 0;
+  });
+
   return issues;
 };
 
@@ -114,6 +151,11 @@ const getIssueById = async (id) => {
   if (!issue) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
   }
+  
+  const { TimeLog } = require('../../models');
+  const logs = await TimeLog.find({ issue: id, deletedAt: null });
+  issue.totalTimeSpent = parseFloat(logs.reduce((sum, log) => sum + (log.duration || 0), 0).toFixed(2));
+  
   return issue;
 };
 
@@ -122,6 +164,11 @@ const getIssueByFormattedId = async (issueId) => {
   if (!issue) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
   }
+  
+  const { TimeLog } = require('../../models');
+  const logs = await TimeLog.find({ issue: issue._id, deletedAt: null });
+  issue.totalTimeSpent = parseFloat(logs.reduce((sum, log) => sum + (log.duration || 0), 0).toFixed(2));
+  
   return issue;
 };
 
@@ -192,9 +239,13 @@ const updateIssueById = async (issueId, updateBody, updaterUser = null) => {
   try {
     const notificationService = require('../system/notification.service');
     const projectId = issue.project ? (issue.project._id || issue.project) : '';
+    const updaterId = updaterUser ? updaterUser._id : null;
+
+    // A2: Notify newly assigned developer
     if (assigneeChanged) {
       await notificationService.createNotification({
         recipient: newAssignee,
+        sender: updaterId,
         title: 'Issue Assigned',
         message: `You have been assigned the issue: ${issue.title} (${issue.issueId}).`,
         type: 'info',
@@ -204,17 +255,40 @@ const updateIssueById = async (issueId, updateBody, updaterUser = null) => {
       });
     }
 
+    // A3: Notify the issue creator (reporter) when status changes
+    const statusChanged = updateBody.status && oldStatus !== updateBody.status;
+    if (statusChanged && issue.createdBy) {
+      const creatorId = issue.createdBy._id || issue.createdBy;
+      // Don't notify if the updater IS the creator
+      if (!updaterId || String(creatorId) !== String(updaterId)) {
+        await notificationService.createNotification({
+          recipient: creatorId,
+          sender: updaterId,
+          title: 'Issue Status Updated',
+          message: `Issue "${issue.title}" (${issue.issueId}) status changed from "${oldStatus}" to "${issue.status}".`,
+          type: 'info',
+          module: 'issues',
+          relatedId: issue._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
+    }
+
+    // A6: Notify assigned developer when issue is reopened
     if (statusChangedToReopened && issue.assignedTo) {
       const recipientId = issue.assignedTo._id || issue.assignedTo;
-      await notificationService.createNotification({
-        recipient: recipientId,
-        title: 'Issue Reopened',
-        message: `The issue assigned to you has been reopened: ${issue.title} (${issue.issueId}).`,
-        type: 'warning',
-        module: 'issues',
-        relatedId: issue._id,
-        relatedLink: `/issues?project=${projectId}`,
-      });
+      if (!updaterId || String(recipientId) !== String(updaterId)) {
+        await notificationService.createNotification({
+          recipient: recipientId,
+          sender: updaterId,
+          title: 'Issue Reopened',
+          message: `The issue assigned to you has been reopened: ${issue.title} (${issue.issueId}).`,
+          type: 'warning',
+          module: 'issues',
+          relatedId: issue._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
     }
 
     // Notify Admins and Managers for Time Expansion
@@ -310,6 +384,46 @@ const removeAttachment = async (issueId, attachmentId) => {
   return issue;
 };
 
+/**
+ * Notify admins/managers when an active timer exceeds the issue's estimated hours
+ */
+const notifyTimeExceeded = async (issueId, activeDuration, userId) => {
+  const issue = await getIssueById(issueId);
+  if (!issue || !issue.estimatedHours || issue.estimatedHours <= 0) {
+    return issue;
+  }
+
+  const notificationService = require('../system/notification.service');
+  const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+  const projectId = issue.project ? (issue.project._id || issue.project) : '';
+
+  // Get active session duration in hours
+  const activeHours = activeDuration / 3600;
+
+  // Get logged hours in DB
+  const { TimeLog } = require('../../models');
+  const logs = await TimeLog.find({ issue: issueId, deletedAt: null });
+  const loggedHours = logs.reduce((sum, log) => sum + (log.duration || 0), 0);
+
+  const totalTrackedHours = loggedHours + activeHours;
+
+  for (const recipient of adminsAndManagers) {
+    if (userId && String(recipient._id) === String(userId)) continue;
+    await notificationService.createNotification({
+      recipient: recipient._id,
+      sender: userId,
+      title: `Time Estimate Exceeded: ${issue.issueId}`,
+      message: `The total tracked time on issue "${issue.title}" (${issue.issueId}) has reached ${totalTrackedHours.toFixed(2)} hours, exceeding the estimated ${issue.estimatedHours} hours.`,
+      type: 'warning',
+      module: 'issues',
+      relatedId: issue._id,
+      relatedLink: `/issues?project=${projectId}`,
+    });
+  }
+
+  return issue;
+};
+
 module.exports = {
   createIssue,
   queryIssues,
@@ -319,4 +433,5 @@ module.exports = {
   deleteIssueById,
   addAttachments,
   removeAttachment,
+  notifyTimeExceeded,
 };

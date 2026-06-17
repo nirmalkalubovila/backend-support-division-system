@@ -3,6 +3,7 @@ const auth = require('../../../middlewares/auth');
 const validate = require('../../../middlewares/validate');
 const issueValidation = require('../../../validations/issue-management/issue.validation');
 const issueController = require('../../../controllers/issue-management/issue.controller');
+const commentController = require('../../../controllers/issue-management/comment.controller');
 const activityLogger = require('../../../middlewares/activity-logger');
 const { uploadIssueAttachments } = require('../../../middlewares/upload');
 
@@ -29,4 +30,20 @@ router
   .route('/:issueId/attachments/:attachmentId')
   .delete(auth('issues.issue.update'), activityLogger('Delete attachment'), issueController.deleteAttachment);
 
+// Notify time limit exceeded route (A5 / E+)
+router
+  .route('/:issueId/time-exceeded')
+  .post(auth('time_tracking.time_log.create'), validate(issueValidation.notifyTimeExceeded), issueController.notifyTimeExceeded);
+
+// Comment routes (A7)
+router
+  .route('/:issueId/comments')
+  .post(auth('issues.issue.read'), validate(issueValidation.addComment), commentController.addComment)
+  .get(auth('issues.issue.read'), validate(issueValidation.getComments), commentController.getComments);
+
+router
+  .route('/:issueId/comments/:commentId')
+  .delete(auth('issues.issue.read'), validate(issueValidation.deleteComment), commentController.deleteComment);
+
 module.exports = router;
+

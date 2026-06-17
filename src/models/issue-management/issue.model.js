@@ -93,6 +93,10 @@ const issueSchema = new mongoose.Schema(
       reason: { type: String, default: null },
       requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     },
+    totalTimeSpent: {
+      type: Number,
+      default: 0,
+    },
     deletedAt: {
       type: Date,
       default: null,

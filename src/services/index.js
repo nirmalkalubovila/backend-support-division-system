@@ -10,6 +10,7 @@ const projectService = require('./project-management/project.service');
 const taskService = require('./project-management/task.service');
 const crService = require('./project-management/cr.service');
 const issueService = require('./issue-management/issue.service');
+const commentService = require('./issue-management/comment.service');
 const brandingService = require('./system/branding.service');
 const timeLogService = require('./time-tracking/time-log.service');
 const notificationService = require('./system/notification.service');
@@ -28,6 +29,7 @@ module.exports = {
   taskService,
   crService,
   issueService,
+  commentService,
   brandingService,
   timeLogService,
   notificationService,

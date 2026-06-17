@@ -91,6 +91,11 @@ const deleteAttachment = catchAsync(async (req, res) => {
   res.send(issue);
 });
 
+const notifyTimeExceeded = catchAsync(async (req, res) => {
+  await issueService.notifyTimeExceeded(req.params.issueId, req.body.activeDuration, req.user.id);
+  res.status(httpStatus.OK).send({ message: 'Notifications sent successfully' });
+});
+
 module.exports = {
   createIssue,
   getIssues,
@@ -99,4 +104,5 @@ module.exports = {
   deleteIssue,
   uploadAttachments,
   deleteAttachment,
+  notifyTimeExceeded,
 };

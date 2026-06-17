@@ -69,11 +69,59 @@ const getUserByEmail = async (email) => {
  */
 const updateUserById = async (userId, updateBody) => {
   const user = await getUserById(userId);
+  const oldRole = user.role;
+  const oldIsActive = user.isActive;
+
   if (updateBody.email && (await User.isEmailTaken(updateBody.email, userId))) {
     throw new ApiError(httpStatus.CONFLICT, 'Email already taken');
   }
   Object.assign(user, updateBody);
   await user.save();
+
+  // F2: Notify user if their role/permissions were changed
+  if (updateBody.role && updateBody.role !== oldRole) {
+    try {
+      const notificationService = require('../system/notification.service');
+      await notificationService.createNotification({
+        recipient: user._id,
+        title: 'Permissions Changed',
+        message: `Your role has been updated from "${oldRole.replace('_', ' ')}" to "${updateBody.role.replace('_', ' ')}". Your permissions have been adjusted accordingly.`,
+        type: 'system',
+        module: 'system',
+        relatedId: user._id,
+        relatedLink: '/profile',
+      });
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to send role change notification', { error: err.message });
+    }
+  }
+
+  // F3 partial: Notify user if their account was deactivated
+  if (updateBody.isActive === false && oldIsActive === true) {
+    const config = require('../../config/config');
+    if (config.email.smtp.host && user.email) {
+      const emailService = require('../email/email.service');
+      const logger = require('../../config/logger');
+      Promise.resolve().then(async () => {
+        try {
+          await emailService.sendNotificationEmail(
+            user.email,
+            'Account Deactivated',
+            'Account Status Update',
+            'Your account on the Support Division Portal has been deactivated. If you believe this is an error, please contact your administrator.',
+            '/login',
+            'warning',
+            {}
+          );
+          logger.info(`Account deactivation email sent to ${user.email}`);
+        } catch (err) {
+          logger.warn(`Failed to send deactivation email to ${user.email}: ${err.message}`);
+        }
+      });
+    }
+  }
+
   return user;
 };
 
@@ -85,6 +133,30 @@ const deleteUserById = async (userId) => {
   user.deletedAt = new Date();
   user.isActive = false;
   await user.save();
+
+  // F3: Send deactivation email
+  const config = require('../../config/config');
+  if (config.email.smtp.host && user.email) {
+    const emailService = require('../email/email.service');
+    const logger = require('../../config/logger');
+    Promise.resolve().then(async () => {
+      try {
+        await emailService.sendNotificationEmail(
+          user.email,
+          'Account Deactivated',
+          'Account Status Update',
+          'Your account on the Support Division Portal has been deactivated. If you believe this is an error, please contact your administrator.',
+          '/login',
+          'warning',
+          {}
+        );
+        logger.info(`Account deactivation email sent to ${user.email}`);
+      } catch (err) {
+        logger.warn(`Failed to send deactivation email to ${user.email}: ${err.message}`);
+      }
+    });
+  }
+
   return user;
 };
 

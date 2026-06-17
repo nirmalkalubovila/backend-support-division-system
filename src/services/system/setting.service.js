@@ -117,6 +117,18 @@ const updateCategories = async (categoriesBody) => {
 };
 
 /**
+ * Default module notification preferences (all enabled)
+ */
+const DEFAULT_MODULE_PREFERENCES = {
+  issues: { email: true, inApp: true },
+  projects: { email: true, inApp: true },
+  crs: { email: true, inApp: true },
+  tasks: { email: true, inApp: true },
+  'time-tracking': { email: true, inApp: true },
+  system: { email: true, inApp: true },
+};
+
+/**
  * Get system notification preferences
  * @returns {Promise<Object>}
  */
@@ -128,9 +140,15 @@ const getNotifications = async () => {
       inAppSlaBreach: true,
       dailySummary: false,
       projectHourWarning: true,
+      modulePreferences: { ...DEFAULT_MODULE_PREFERENCES },
     };
   }
-  return notificationsSetting.value;
+  // Ensure modulePreferences exists even if saved before this feature
+  const value = notificationsSetting.value;
+  if (!value.modulePreferences) {
+    value.modulePreferences = { ...DEFAULT_MODULE_PREFERENCES };
+  }
+  return value;
 };
 
 /**

@@ -85,10 +85,49 @@ const deleteIssue = {
   }),
 };
 
+const addComment = {
+  params: Joi.object().keys({
+    issueId: Joi.string().required(),
+  }),
+  body: Joi.object().keys({
+    content: Joi.string().required().min(1).max(5000),
+  }),
+};
+
+const getComments = {
+  params: Joi.object().keys({
+    issueId: Joi.string().required(),
+  }),
+  query: Joi.object().keys({
+    limit: Joi.number().integer().min(1).max(100),
+    page: Joi.number().integer().min(1),
+  }),
+};
+
+const deleteComment = {
+  params: Joi.object().keys({
+    issueId: Joi.string().required(),
+    commentId: Joi.string().required(),
+  }),
+};
+
+const notifyTimeExceeded = {
+  params: Joi.object().keys({
+    issueId: Joi.string().required(),
+  }),
+  body: Joi.object().keys({
+    activeDuration: Joi.number().required().min(0),
+  }),
+};
+
 module.exports = {
   createIssue,
   getIssues,
   getIssue,
   updateIssue,
   deleteIssue,
+  addComment,
+  getComments,
+  deleteComment,
+  notifyTimeExceeded,
 };
