@@ -92,7 +92,7 @@ const getPerformanceData = async (startDate, endDate) => {
     const resolutionTimeHours = (issue.updatedAt - issue.createdAt) / (1000 * 60 * 60);
     resolutionTimes.push(Math.max(0.1, resolutionTimeHours));
 
-    if (issue.updatedAt <= issue.dueDate) {
+    if (!issue.dueDate || issue.updatedAt <= issue.dueDate) {
       withinSlaCount++;
     } else {
       if (slaBreachesByPriority[issue.priority] !== undefined) {
@@ -642,7 +642,7 @@ const getPerformanceData = async (startDate, endDate) => {
       updatedAt: { $gte: start, $lte: end },
       deletedAt: null,
     });
-    const projWithinSla = projResolved.filter((i) => i.updatedAt <= i.dueDate).length;
+    const projWithinSla = projResolved.filter((i) => !i.dueDate || i.updatedAt <= i.dueDate).length;
     const projSlaRate = projResolved.length > 0
       ? parseFloat(((projWithinSla / projResolved.length) * 100).toFixed(1))
       : 100;

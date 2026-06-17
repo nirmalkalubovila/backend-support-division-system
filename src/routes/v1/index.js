@@ -5,6 +5,7 @@ const settingRoute = require('./system/setting.route');
 const reportRoute = require('./reports/report.route');
 const projectPerformanceRoute = require('./reports/project-performance.route');
 const userPerformanceRoute = require('./reports/user-performance.route');
+const executivePerformanceRoute = require('./reports/executive-performance.route');
 const clientRoute = require('./projects/client.route');
 const projectRoute = require('./projects/project.route');
 const taskRoute = require('./projects/tasks/task.route');
@@ -22,6 +23,7 @@ const defaultRoutes = [
   { path: '/system',   route: settingRoute },
   { path: '/reports/performance', route: projectPerformanceRoute },
   { path: '/reports/user-performance', route: userPerformanceRoute },
+  { path: '/reports/executive-performance', route: executivePerformanceRoute },
   { path: '/reports',  route: reportRoute },
   { path: '/clients',  route: clientRoute },
   { path: '/projects', route: projectRoute },
