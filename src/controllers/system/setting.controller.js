@@ -74,3 +74,30 @@ module.exports = {
   getReportSchedule,
   updateReportSchedule,
 };
+
+const getFinanceSettings = catchAsync(async (req, res) => {
+  const financeSettings = await settingService.getFinanceSettings();
+  res.send(financeSettings);
+});
+
+const updateFinanceSettings = catchAsync(async (req, res) => {
+  const financeSettings = await settingService.updateFinanceSettings(req.body);
+  res.send(financeSettings);
+});
+
+module.exports = {
+  getBranding,
+  updateBranding,
+  getPriorities,
+  updatePriorities,
+  getCategories,
+  updateCategories,
+  getNotifications,
+  updateNotifications,
+  uploadLogo,
+  getReportSchedule,
+  updateReportSchedule,
+  getFinanceSettings,
+  updateFinanceSettings,
+};
+

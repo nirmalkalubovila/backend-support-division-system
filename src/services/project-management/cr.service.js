@@ -21,8 +21,8 @@ const createCR = async (body, userId) => {
     ...body,
     crNumber,
     createdBy: userId,
-    status: 'Draft',
-    timeline: [{ fromStatus: null, toStatus: 'Draft', changedBy: userId, note: 'CR created' }],
+    status: body.status || 'Submitted',
+    timeline: [{ fromStatus: null, toStatus: body.status || 'Submitted', changedBy: userId, note: 'CR created' }],
   });
   return cr.populate('assignedProjectManager assignedDevelopers createdBy', 'name email role avatar');
 };
@@ -75,7 +75,7 @@ const updateCRById = async (crId, updateBody, userId) => {
           sender: userId,
           title: 'Change Request Status Updated',
           message: `The Change Request "${cr.title}" (${cr.crNumber}) status has been updated from "${prevStatus}" to "${cr.status}".`,
-          type: cr.status === 'Approved' ? 'success' : cr.status === 'Rejected' ? 'error' : 'info',
+          type: cr.status === 'Rejected' ? 'error' : 'info',
           module: 'crs',
           relatedId: cr._id,
           relatedLink: `/projects/${cr.project}`,
@@ -128,8 +128,6 @@ const getCRStats = async (projectId) => {
   const crs = await ChangeRequest.find({ project: projectId, deletedAt: null });
   const stats = {
     total: crs.length,
-    open: crs.filter((c) => ['Draft', 'Submitted', 'Under Review'].includes(c.status)).length,
-    approved: crs.filter((c) => c.status === 'Approved').length,
     inDevelopment: crs.filter((c) => c.status === 'In Development').length,
     completed: crs.filter((c) => c.status === 'Completed').length,
     rejected: crs.filter((c) => c.status === 'Rejected').length,

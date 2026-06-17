@@ -1,7 +1,7 @@
 const Joi = require('joi');
 
 const CR_TYPES = ['Enhancement', 'New Feature', 'Modification', 'Integration', 'UI/UX Change', 'Data Change', 'Bug Fix', 'Other'];
-const CR_STATUSES = ['Draft', 'Submitted', 'Under Review', 'Approved', 'Rejected', 'In Development', 'Testing', 'Completed', 'Closed'];
+const CR_STATUSES = ['Submitted', 'Rejected', 'In Development', 'Testing', 'Completed', 'Closed'];
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 
 const createCR = {
@@ -10,7 +10,7 @@ const createCR = {
     title: Joi.string().required().max(200),
     crType: Joi.string().valid(...CR_TYPES).default('Enhancement'),
     priority: Joi.string().valid(...PRIORITIES).default('Medium'),
-    status: Joi.string().valid(...CR_STATUSES).default('Draft'),
+    status: Joi.string().valid(...CR_STATUSES).default('Submitted'),
     requestedBy: Joi.string().allow('', null),
     requestedDate: Joi.date().allow(null),
     targetReleaseDate: Joi.date().allow(null),

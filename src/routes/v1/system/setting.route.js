@@ -94,4 +94,14 @@ router.patch('/report-schedule',
   settingController.updateReportSchedule
 );
 
+router.get('/finance-settings', settingController.getFinanceSettings);
+
+router.patch('/finance-settings',
+  auth('system.settings.update'),
+  validate(settingValidation.updateFinanceSettings),
+  activityLogger('Update finance settings'),
+  settingController.updateFinanceSettings
+);
+
 module.exports = router;
+

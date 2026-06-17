@@ -80,3 +80,19 @@ module.exports = {
   updateNotifications,
   updateReportSchedule,
 };
+
+const updateFinanceSettings = {
+  body: Joi.object().keys({
+    defaultContractedHourlyRate: Joi.number().min(0).required(),
+  }),
+};
+
+module.exports = {
+  updateBranding,
+  updatePriorities,
+  updateCategories,
+  updateNotifications,
+  updateReportSchedule,
+  updateFinanceSettings,
+};
+
