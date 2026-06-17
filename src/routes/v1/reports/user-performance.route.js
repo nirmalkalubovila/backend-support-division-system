@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get(
   '/team-comparison',
-  auth('reports.daily_report.read'),
+  auth('reports.user_performance.read'),
   validate(userPerformanceValidation.getTeamComparison),
   userPerformanceController.getTeamComparison
 );

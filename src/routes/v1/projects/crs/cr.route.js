@@ -8,34 +8,34 @@ const activityLogger = require('../../../../middlewares/activity-logger');
 
 const router = express.Router({ mergeParams: true });
 
-router.get('/stats', auth('projects.project.read'), crController.getCRStats);
+router.get('/stats', auth('projects.cr.read'), crController.getCRStats);
 
 router
   .route('/')
-  .get(auth('projects.project.read'), validate(crValidation.getProjectCRs), crController.getProjectCRs)
-  .post(auth('projects.project.update'), validate(crValidation.createCR), activityLogger('Create change request'), crController.createCR);
+  .get(auth('projects.cr.read'), validate(crValidation.getProjectCRs), crController.getProjectCRs)
+  .post(auth('projects.cr.create'), validate(crValidation.createCR), activityLogger('Create change request'), crController.createCR);
 
 router
   .route('/:crId')
-  .get(auth('projects.project.read'), validate(crValidation.getCR), crController.getCR)
-  .patch(auth('projects.project.update'), validate(crValidation.updateCR), activityLogger('Update change request'), crController.updateCR)
-  .delete(auth('projects.project.update'), validate(crValidation.deleteCR), activityLogger('Delete change request'), crController.deleteCR);
+  .get(auth('projects.cr.read'), validate(crValidation.getCR), crController.getCR)
+  .patch(auth('projects.cr.update'), validate(crValidation.updateCR), activityLogger('Update change request'), crController.updateCR)
+  .delete(auth('projects.cr.delete'), validate(crValidation.deleteCR), activityLogger('Delete change request'), crController.deleteCR);
 
 router
   .route('/:crId/attachments')
-  .post(auth('projects.project.update'), uploadIssueAttachments.array('files', 10), crController.uploadAttachments);
+  .post(auth('projects.cr.update'), uploadIssueAttachments.array('files', 10), crController.uploadAttachments);
 
 router
   .route('/:crId/attachments/:attachmentId')
-  .delete(auth('projects.project.update'), crController.deleteAttachment);
+  .delete(auth('projects.cr.update'), crController.deleteAttachment);
 
 router
   .route('/:crId/tasks')
-  .get(auth('projects.project.read'), crController.getCRTasks)
-  .post(auth('projects.project.update'), activityLogger('Link task to CR'), crController.linkTask);
+  .get(auth('projects.cr.read'), crController.getCRTasks)
+  .post(auth('projects.cr.update'), activityLogger('Link task to CR'), crController.linkTask);
 
 router
   .route('/:crId/tasks/:taskId')
-  .delete(auth('projects.project.update'), activityLogger('Unlink task from CR'), crController.unlinkTask);
+  .delete(auth('projects.cr.update'), activityLogger('Unlink task from CR'), crController.unlinkTask);
 
 module.exports = router;
