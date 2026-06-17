@@ -20,6 +20,30 @@ const createNotification = async (notificationBody) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Recipient user not found');
   }
 
+  // --- Module-level notification gatekeeper ---
+  // Check if the recipient is a manager/admin and if this module's notifications are disabled
+  let moduleInAppEnabled = true;
+  let moduleEmailEnabled = true;
+
+  if (module && recipientUser.role && ['super_admin', 'admin', 'manager'].includes(recipientUser.role)) {
+    try {
+      const settingService = require('./setting.service');
+      const notifPrefs = await settingService.getNotifications();
+      if (notifPrefs.modulePreferences && notifPrefs.modulePreferences[module]) {
+        moduleInAppEnabled = notifPrefs.modulePreferences[module].inApp !== false;
+        moduleEmailEnabled = notifPrefs.modulePreferences[module].email !== false;
+      }
+    } catch (prefError) {
+      logger.warn('Failed to load module notification preferences, defaulting to enabled', { error: prefError.message });
+    }
+  }
+
+  // If in-app notifications are disabled for this module, skip DB + WebSocket
+  if (!moduleInAppEnabled) {
+    logger.info(`In-app notification skipped for module "${module}" (disabled by admin preference)`);
+    return null;
+  }
+
   // Create notification in DB
   const notification = await Notification.create({
     recipient,
@@ -44,8 +68,8 @@ const createNotification = async (notificationBody) => {
   }
 
   // Send Email Notification (non-blocking, try-catch secured)
-  // Check if SMTP host is configured to avoid crashes
-  if (config.email.smtp.host && recipientUser.email) {
+  // Check if SMTP host is configured, email is enabled for this module, and recipient has an email
+  if (config.email.smtp.host && recipientUser.email && moduleEmailEnabled) {
     // Run asynchronously without awaiting so response isn't blocked
     Promise.resolve().then(async () => {
       try {
@@ -99,7 +123,7 @@ const createNotification = async (notificationBody) => {
           }
         }
 
-        const subject = `[Support Portal] ${title}`;
+        const subject = title;
         await emailService.sendNotificationEmail(recipientUser.email, subject, title, message, relatedLink, type, {
           project,
           dueDate,
@@ -110,6 +134,8 @@ const createNotification = async (notificationBody) => {
         logger.warn(`Failed to send notification email to ${recipientUser.email}: ${emailError.message}`);
       }
     });
+  } else if (!moduleEmailEnabled) {
+    logger.info(`Email notification skipped for module "${module}" (disabled by admin preference)`);
   }
 
   return notification;
@@ -186,7 +212,7 @@ const deleteNotification = async (notificationId, userId) => {
   if (!notification) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Notification not found');
   }
-  await notification.remove ? await notification.remove() : await Notification.deleteOne({ _id: notificationId });
+  await Notification.deleteOne({ _id: notificationId, recipient: userId });
 };
 
 module.exports = {

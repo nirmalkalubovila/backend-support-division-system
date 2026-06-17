@@ -10,6 +10,7 @@ const Project = require('./project-management/project.model');
 const Task = require('./project-management/task.model');
 const ChangeRequest = require('./project-management/cr.model');
 const Issue = require('./issue-management/issue.model');
+const Comment = require('./issue-management/comment.model');
 const Branding = require('./system/branding.model');
 const TimeLog = require('./time-tracking/time-log.model');
 const Notification = require('./system/notification.model');
@@ -28,6 +29,7 @@ module.exports = {
   Project,
   Task,
   Issue,
+  Comment,
   Branding,
   TimeLog,
   ChangeRequest,

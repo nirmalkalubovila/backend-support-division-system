@@ -3,7 +3,7 @@ const Joi = require('joi');
 const startTimer = {
   body: Joi.object().keys({
     issueId: Joi.string().required(),
-    workType: Joi.string().valid('Investigation', 'Development', 'Testing', 'Communication', 'Documentation', 'Deployment').required(),
+    workType: Joi.string().valid('Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client').required(),
     note: Joi.string().allow(''),
     isBillable: Joi.boolean().default(true),
   }),
@@ -21,7 +21,7 @@ const createManualLog = {
     issueId: Joi.string().required(),
     startTime: Joi.date().iso().required(),
     endTime: Joi.date().iso().required(),
-    workType: Joi.string().valid('Investigation', 'Development', 'Testing', 'Communication', 'Documentation', 'Deployment').required(),
+    workType: Joi.string().valid('Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client').required(),
     note: Joi.string().allow(''),
     isBillable: Joi.boolean().default(true),
   }),
@@ -33,7 +33,7 @@ const updateLog = {
   }),
   body: Joi.object()
     .keys({
-      workType: Joi.string().valid('Investigation', 'Development', 'Testing', 'Communication', 'Documentation', 'Deployment'),
+      workType: Joi.string().valid('Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client'),
       note: Joi.string().allow(''),
       duration: Joi.number().min(0).allow(null),
       isBillable: Joi.boolean(),

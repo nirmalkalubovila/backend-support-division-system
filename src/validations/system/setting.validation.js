@@ -40,12 +40,25 @@ const updateCategories = {
   }),
 };
 
+const modulePreferenceSchema = Joi.object().keys({
+  email: Joi.boolean().required(),
+  inApp: Joi.boolean().required(),
+});
+
 const updateNotifications = {
   body: Joi.object().keys({
     emailCritical: Joi.boolean().required(),
     inAppSlaBreach: Joi.boolean().required(),
     dailySummary: Joi.boolean().required(),
     projectHourWarning: Joi.boolean().required(),
+    modulePreferences: Joi.object().keys({
+      issues: modulePreferenceSchema.required(),
+      projects: modulePreferenceSchema.required(),
+      crs: modulePreferenceSchema.required(),
+      tasks: modulePreferenceSchema.required(),
+      'time-tracking': modulePreferenceSchema.required(),
+      system: modulePreferenceSchema.required(),
+    }).required(),
   }),
 };
 

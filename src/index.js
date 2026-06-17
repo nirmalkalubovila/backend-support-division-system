@@ -4,6 +4,7 @@ const config = require('./config/config');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const { initReportJobs } = require('./jobs/report.job');
+const { initNotificationJobs } = require('./jobs/notification.job');
 const socketServer = require('./config/socket');
 
 let server;
@@ -21,11 +22,18 @@ const startServer = async () => {
     logger.info(`Server listening on port ${config.port} in ${config.env} mode`);
   });
 
-  // 3. Initialize scheduled report jobs
+  // 4. Initialize scheduled report jobs
   try {
     await initReportJobs();
   } catch (error) {
     logger.warn('Failed to initialize report jobs', { error: error.message });
+  }
+
+  // 5. Initialize notification scheduled jobs (SLA, deadlines, etc.)
+  try {
+    initNotificationJobs();
+  } catch (error) {
+    logger.warn('Failed to initialize notification jobs', { error: error.message });
   }
 };
 

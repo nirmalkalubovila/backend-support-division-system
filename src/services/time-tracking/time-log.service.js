@@ -161,8 +161,35 @@ const stopTimer = async (userId, issueId, note = '') => {
     checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
   });
 
-  // Note: Since approval is false by default, we don't recalculate project usedHours yet.
-  // It will be calculated when the manager approves the log.
+  // E1: Notify project managers that a time log has been submitted for review
+  Promise.resolve().then(async () => {
+    try {
+      const notificationService = require('../system/notification.service');
+      const issue = await Issue.findById(issueId).populate('project');
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+      const logUser = await User.findById(userId);
+      const userName = logUser ? logUser.name : 'A team member';
+      const issueName = issue ? issue.title : 'an issue';
+      const projectId = issue && issue.project ? (issue.project._id || issue.project) : '';
+
+      for (const recipient of adminsAndManagers) {
+        if (String(recipient._id) === String(userId)) continue;
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: 'Time Log Submitted',
+          message: `${userName} submitted a time log of ${activeLog.duration.toFixed(2)}h for "${issueName}" — pending your approval.`,
+          type: 'info',
+          module: 'time-tracking',
+          relatedId: activeLog._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to send time log submission notification', { error: err.message });
+    }
+  });
 
   return activeLog;
 };
@@ -232,6 +259,36 @@ const createManualLog = async (userId, issueId, startTime, endTime, workType, no
     checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
   });
 
+  // E1: Notify project managers that a manual time log has been submitted
+  Promise.resolve().then(async () => {
+    try {
+      const notificationService = require('../system/notification.service');
+      const issue = await Issue.findById(issueId).populate('project');
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+      const logUser = await User.findById(userId);
+      const userName = logUser ? logUser.name : 'A team member';
+      const issueName = issue ? issue.title : 'an issue';
+      const projectId = issue && issue.project ? (issue.project._id || issue.project) : '';
+
+      for (const recipient of adminsAndManagers) {
+        if (String(recipient._id) === String(userId)) continue;
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: 'Time Log Submitted',
+          message: `${userName} submitted a manual time log of ${timeLog.duration.toFixed(2)}h for "${issueName}" — pending your approval.`,
+          type: 'info',
+          module: 'time-tracking',
+          relatedId: timeLog._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to send manual time log submission notification', { error: err.message });
+    }
+  });
+
   return timeLog;
 };
 
@@ -264,6 +321,7 @@ const getTimeLogById = async (id) => {
 const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) => {
   const timeLog = await getTimeLogById(logId);
   const previousDuration = timeLog.duration || 0;
+  const previousApprovalStatus = timeLog.approved;
 
   // Authorization checks
   const isManagerOrAdmin = currentUserRole === 'super_admin' || currentUserRole === 'manager';
@@ -320,10 +378,58 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
     }
   });
 
+  const currentApproved = timeLog.approved;
+  const approvalChanged = updateBody.hasOwnProperty('approved') && previousApprovalStatus !== currentApproved;
+
   await timeLog.save();
 
   // If approval status was modified, update project stats
   await updateProjectUsedHours(timeLog.project._id);
+
+  // B3/B4: Check project budget thresholds after hour recalculation
+  if (approvalChanged && currentApproved) {
+    Promise.resolve().then(async () => {
+      try {
+        const projectDoc = await Project.findById(timeLog.project._id || timeLog.project);
+        if (projectDoc) {
+          const projectService = require('../project-management/project.service');
+          await projectService.checkBudgetThresholds(projectDoc);
+        }
+      } catch (err) {
+        const logger = require('../../config/logger');
+        logger.error('Failed to check budget thresholds', { error: err.message });
+      }
+    });
+  }
+
+  // E2: Notify the developer when their time log is approved/rejected
+  if (approvalChanged) {
+    Promise.resolve().then(async () => {
+      try {
+        const notificationService = require('../system/notification.service');
+        const developerId = timeLog.user._id || timeLog.user;
+        if (String(developerId) !== String(currentUserId)) {
+          const issueDoc = timeLog.issue;
+          const issueName = issueDoc && issueDoc.title ? issueDoc.title : 'an issue';
+          const projectId = timeLog.project._id || timeLog.project;
+          const status = currentApproved ? 'approved' : 'rejected';
+          await notificationService.createNotification({
+            recipient: developerId,
+            sender: currentUserId,
+            title: `Time Log ${currentApproved ? 'Approved' : 'Rejected'}`,
+            message: `Your time log for "${issueName}" has been ${status} by a manager.`,
+            type: currentApproved ? 'success' : 'warning',
+            module: 'time-tracking',
+            relatedId: timeLog._id,
+            relatedLink: `/issues?project=${projectId}`,
+          });
+        }
+      } catch (err) {
+        const logger = require('../../config/logger');
+        logger.error('Failed to send time log approval notification', { error: err.message });
+      }
+    });
+  }
 
   const issueId = timeLog.issue._id || timeLog.issue;
   Promise.resolve().then(() => {
