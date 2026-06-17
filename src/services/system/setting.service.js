@@ -217,3 +217,58 @@ module.exports = {
   getReportSchedule,
   updateReportSchedule,
 };
+
+/**
+ * Get system finance settings
+ * @returns {Promise<Object>}
+ */
+const getFinanceSettings = async () => {
+  const setting = await Setting.findOne({ key: 'financeSettings' });
+  if (!setting) {
+    return {
+      defaultContractedHourlyRate: 5000,
+    };
+  }
+  return setting.value;
+};
+
+/**
+ * Update system finance settings
+ * @param {Object} financeBody
+ * @returns {Promise<Object>}
+ */
+const updateFinanceSettings = async (financeBody) => {
+  let setting = await Setting.findOne({ key: 'financeSettings' });
+
+  if (!setting) {
+    setting = await Setting.create({
+      key: 'financeSettings',
+      value: financeBody,
+    });
+  } else {
+    setting.value = {
+      ...setting.value,
+      ...financeBody,
+    };
+    setting.markModified('value');
+    await setting.save();
+  }
+
+  return setting.value;
+};
+
+module.exports = {
+  getBranding,
+  updateBranding,
+  getPriorities,
+  updatePriorities,
+  getCategories,
+  updateCategories,
+  getNotifications,
+  updateNotifications,
+  getReportSchedule,
+  updateReportSchedule,
+  getFinanceSettings,
+  updateFinanceSettings,
+};
+
