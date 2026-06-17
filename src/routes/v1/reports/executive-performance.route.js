@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get(
   '/',
-  auth('reports.executive_report.read'),
+  auth('reports.executive_performance.read'),
   validate(executivePerformanceValidation.getExecutivePerformanceData),
   executivePerformanceController.getExecutivePerformanceData
 );

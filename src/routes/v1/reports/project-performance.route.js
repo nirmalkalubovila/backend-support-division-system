@@ -8,7 +8,7 @@ const router = express.Router();
 
 router.get(
   '/',
-  auth('reports.daily_report.read'), // Using manager/above daily report read permission
+  auth('reports.project_performance.read'),
   validate(projectPerformanceValidation.getPerformanceData),
   projectPerformanceController.getPerformanceData
 );

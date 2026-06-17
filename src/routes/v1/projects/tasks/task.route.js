@@ -8,25 +8,25 @@ const activityLogger = require('../../../../middlewares/activity-logger');
 
 const router = express.Router({ mergeParams: true });
 
-router.get('/workflow-rules', auth('projects.project.read'), taskController.getWorkflowRules);
+router.get('/workflow-rules', auth('projects.task.read'), taskController.getWorkflowRules);
 
 router
   .route('/')
-  .get(auth('projects.project.read'), validate(taskValidation.getProjectTasks), taskController.getProjectTasks)
-  .post(auth('projects.project.update'), validate(taskValidation.createTask), activityLogger('Create task'), taskController.createTask);
+  .get(auth('projects.task.read'), validate(taskValidation.getProjectTasks), taskController.getProjectTasks)
+  .post(auth('projects.task.create'), validate(taskValidation.createTask), activityLogger('Create task'), taskController.createTask);
 
 router
   .route('/:taskId')
-  .get(auth('projects.project.read'), validate(taskValidation.getTask), taskController.getTask)
-  .patch(auth('projects.project.update'), validate(taskValidation.updateTask), activityLogger('Update task'), taskController.updateTask)
-  .delete(auth('projects.project.update'), validate(taskValidation.deleteTask), activityLogger('Delete task'), taskController.deleteTask);
+  .get(auth('projects.task.read'), validate(taskValidation.getTask), taskController.getTask)
+  .patch(auth('projects.task.update'), validate(taskValidation.updateTask), activityLogger('Update task'), taskController.updateTask)
+  .delete(auth('projects.task.delete'), validate(taskValidation.deleteTask), activityLogger('Delete task'), taskController.deleteTask);
 
 router
   .route('/:taskId/attachments')
-  .post(auth('projects.project.update'), uploadIssueAttachments.array('files', 5), taskController.uploadAttachments);
+  .post(auth('projects.task.update'), uploadIssueAttachments.array('files', 5), taskController.uploadAttachments);
 
 router
   .route('/:taskId/attachments/:attachmentId')
-  .delete(auth('projects.project.update'), taskController.deleteAttachment);
+  .delete(auth('projects.task.update'), taskController.deleteAttachment);
 
 module.exports = router;
