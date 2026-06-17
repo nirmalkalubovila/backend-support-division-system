@@ -1,6 +1,6 @@
 const httpStatus = require('http-status');
 const mongoose = require('mongoose');
-const { TimeLog, Issue, Project } = require('../../models');
+const { TimeLog, Issue, Project, User } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
 /**
@@ -30,6 +30,59 @@ const updateProjectUsedHours = async (projectId) => {
     { _id: projectId },
     { usedHours: parseFloat(totalHours.toFixed(2)) }
   );
+};
+
+/**
+ * Check if the total tracked time on an issue has exceeded its estimated hours,
+ * and notify admins and managers if it has just crossed the threshold.
+ * @param {string} issueId
+ * @param {number} sessionDuration - Duration of the current session in hours
+ * @param {number} previousSessionDuration - Previous duration of the current session (if updating) in hours
+ * @param {string} userId - ID of the user performing the action
+ * @returns {Promise<void>}
+ */
+const checkAndNotifyTimeExceeded = async (issueId, sessionDuration = 0, previousSessionDuration = 0, userId = null) => {
+  try {
+    const issue = await Issue.findOne({ _id: issueId, deletedAt: null }).populate('project');
+    if (!issue || !issue.estimatedHours || issue.estimatedHours <= 0) {
+      return;
+    }
+
+    const estimatedHours = issue.estimatedHours;
+
+    // Fetch all active time logs for this issue (not deleted)
+    const logs = await TimeLog.find({ issue: issueId, deletedAt: null });
+
+    // Calculate sum of durations
+    const totalDurationAfter = logs.reduce((sum, log) => sum + (log.duration || 0), 0);
+    const totalDurationBefore = totalDurationAfter - (sessionDuration || 0) + (previousSessionDuration || 0);
+
+    // If total duration just exceeded estimated hours
+    if (totalDurationBefore <= estimatedHours && totalDurationAfter > estimatedHours) {
+      const notificationService = require('../system/notification.service');
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+      const projectId = issue.project ? (issue.project._id || issue.project) : '';
+
+      for (const recipient of adminsAndManagers) {
+        if (userId && String(recipient._id) === String(userId)) {
+          continue;
+        }
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: `Time Estimate Exceeded: ${issue.issueId}`,
+          message: `The total tracked time on issue "${issue.title}" (${issue.issueId}) has reached ${totalDurationAfter.toFixed(2)} hours, exceeding the estimated ${estimatedHours} hours.`,
+          type: 'warning',
+          module: 'issues',
+          relatedId: issue._id,
+          relatedLink: `/issues?project=${projectId}`,
+        });
+      }
+    }
+  } catch (error) {
+    const logger = require('../../config/logger');
+    logger.error('Error checking or sending time estimate exceeded notification', { error: error.message });
+  }
 };
 
 /**
@@ -100,12 +153,17 @@ const stopTimer = async (userId, issueId, note = '') => {
   activeLog.endTime = endTime;
   activeLog.duration = parseFloat(duration.toFixed(2));
   activeLog.note = finalNote;
-  
+
   await activeLog.save();
+
+  // Trigger time limit exceeded check in a non-blocking block
+  Promise.resolve().then(() => {
+    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
+  });
 
   // Note: Since approval is false by default, we don't recalculate project usedHours yet.
   // It will be calculated when the manager approves the log.
-  
+
   return activeLog;
 };
 
@@ -169,6 +227,11 @@ const createManualLog = async (userId, issueId, startTime, endTime, workType, no
     approved: false, // Managers must approve
   });
 
+  // Trigger time limit exceeded check in a non-blocking block
+  Promise.resolve().then(() => {
+    checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
+  });
+
   return timeLog;
 };
 
@@ -200,6 +263,7 @@ const getTimeLogById = async (id) => {
  */
 const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) => {
   const timeLog = await getTimeLogById(logId);
+  const previousDuration = timeLog.duration || 0;
 
   // Authorization checks
   const isManagerOrAdmin = currentUserRole === 'super_admin' || currentUserRole === 'manager';
@@ -260,6 +324,11 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
 
   // If approval status was modified, update project stats
   await updateProjectUsedHours(timeLog.project._id);
+
+  const issueId = timeLog.issue._id || timeLog.issue;
+  Promise.resolve().then(() => {
+    checkAndNotifyTimeExceeded(issueId, timeLog.duration, previousDuration, currentUserId);
+  });
 
   return timeLog;
 };
