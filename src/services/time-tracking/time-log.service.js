@@ -1,6 +1,6 @@
 const httpStatus = require('http-status');
 const mongoose = require('mongoose');
-const { TimeLog, Issue, Project, User } = require('../../models');
+const { TimeLog, Issue, Project, User, Task, ChangeRequest } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
 /**
@@ -86,16 +86,34 @@ const checkAndNotifyTimeExceeded = async (issueId, sessionDuration = 0, previous
 };
 
 /**
- * Start active stopwatch timer for a user on an issue
+ * Start active stopwatch timer for a user on an issue, task, or CR
  */
-const startTimer = async (userId, issueId, workType, note = '', isBillable = true) => {
-  const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
-  if (!issue) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
-  }
+const startTimer = async (userId, issueId, taskId, crId, workType, note = '', isBillable = true) => {
+  let project = null;
 
-  if (issue.status === 'Backlog' || issue.status === 'Closed') {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+  if (issueId) {
+    const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
+    if (!issue) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
+    }
+    if (issue.status === 'Backlog' || issue.status === 'Closed') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+    }
+    project = issue.project;
+  } else if (taskId) {
+    const task = await Task.findOne({ _id: taskId, deletedAt: null });
+    if (!task) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
+    }
+    project = task.project;
+  } else if (crId) {
+    const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
+    if (!cr) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Change Request not found');
+    }
+    project = cr.project;
+  } else {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
   // Check if user already has any active timer
@@ -105,9 +123,11 @@ const startTimer = async (userId, issueId, workType, note = '', isBillable = tru
   }
 
   const timeLog = await TimeLog.create({
-    issue: issueId,
+    issue: issueId || null,
+    task: taskId || null,
+    cr: crId || null,
     user: userId,
-    project: issue.project,
+    project,
     startTime: new Date(),
     workType,
     note,
@@ -115,22 +135,42 @@ const startTimer = async (userId, issueId, workType, note = '', isBillable = tru
     approved: false, // Must be approved by manager later
   });
 
-  // If issue status is not 'In Progress', auto-transition it
-  if (issue.status !== 'In Progress') {
-    issue.status = 'In Progress';
-    await issue.save();
+  // Auto-transitions
+  if (issueId) {
+    const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
+    if (issue && issue.status !== 'In Progress') {
+      issue.status = 'In Progress';
+      await issue.save();
+    }
+  } else if (taskId) {
+    const task = await Task.findOne({ _id: taskId, deletedAt: null });
+    if (task && task.status !== 'In Progress') {
+      task.status = 'In Progress';
+      await task.save();
+    }
+  } else if (crId) {
+    const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
+    if (cr && cr.status !== 'In Development') {
+      cr.status = 'In Development';
+      await cr.save();
+    }
   }
 
   return timeLog;
 };
 
 /**
- * Stop active stopwatch timer for a user on an issue
+ * Stop active stopwatch timer for a user
  */
-const stopTimer = async (userId, issueId, note = '') => {
-  const activeLog = await TimeLog.findOne({ user: userId, issue: issueId, endTime: null, deletedAt: null });
+const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
+  const query = { user: userId, endTime: null, deletedAt: null };
+  if (issueId) query.issue = issueId;
+  else if (taskId) query.task = taskId;
+  else if (crId) query.cr = crId;
+
+  const activeLog = await TimeLog.findOne(query);
   if (!activeLog) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running for this issue and user');
+    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running for this item and user');
   }
 
   const endTime = new Date();
@@ -156,21 +196,39 @@ const stopTimer = async (userId, issueId, note = '') => {
 
   await activeLog.save();
 
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
-  });
+  // Trigger time limit exceeded check in a non-blocking block (only for issues)
+  if (activeLog.issue) {
+    Promise.resolve().then(() => {
+      checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
+    });
+  }
 
   // E1: Notify project managers that a time log has been submitted for review
   Promise.resolve().then(async () => {
     try {
       const notificationService = require('../system/notification.service');
-      const issue = await Issue.findById(issueId).populate('project');
+      let itemName = 'an item';
+      let typeLabel = 'item';
+      let relatedLink = `/projects/${activeLog.project}`;
+
+      if (activeLog.issue) {
+        const issue = await Issue.findById(activeLog.issue);
+        itemName = issue ? issue.title : 'an issue';
+        typeLabel = 'issue';
+        relatedLink = `/issues?project=${activeLog.project}`;
+      } else if (activeLog.task) {
+        const task = await Task.findById(activeLog.task);
+        itemName = task ? task.name : 'a task';
+        typeLabel = 'task';
+      } else if (activeLog.cr) {
+        const cr = await ChangeRequest.findById(activeLog.cr);
+        itemName = cr ? cr.title : 'a CR';
+        typeLabel = 'CR';
+      }
+
       const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
       const logUser = await User.findById(userId);
       const userName = logUser ? logUser.name : 'A team member';
-      const issueName = issue ? issue.title : 'an issue';
-      const projectId = issue && issue.project ? (issue.project._id || issue.project) : '';
 
       for (const recipient of adminsAndManagers) {
         if (String(recipient._id) === String(userId)) continue;
@@ -178,11 +236,11 @@ const stopTimer = async (userId, issueId, note = '') => {
           recipient: recipient._id,
           sender: userId,
           title: 'Time Log Submitted',
-          message: `${userName} submitted a time log of ${activeLog.duration.toFixed(2)}h for "${issueName}" — pending your approval.`,
+          message: `${userName} submitted a time log of ${activeLog.duration.toFixed(2)}h for ${typeLabel} "${itemName}" — pending your approval.`,
           type: 'info',
           module: 'time-tracking',
           relatedId: activeLog._id,
-          relatedLink: `/issues?project=${projectId}`,
+          relatedLink,
         });
       }
     } catch (err) {
@@ -197,14 +255,32 @@ const stopTimer = async (userId, issueId, note = '') => {
 /**
  * Create a manual time log entry
  */
-const createManualLog = async (userId, issueId, startTime, endTime, workType, note = '', isBillable = true) => {
-  const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
-  if (!issue) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
-  }
+const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime, workType, note = '', isBillable = true) => {
+  let project = null;
 
-  if (issue.status === 'Backlog' || issue.status === 'Closed') {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+  if (issueId) {
+    const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
+    if (!issue) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
+    }
+    if (issue.status === 'Backlog' || issue.status === 'Closed') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+    }
+    project = issue.project;
+  } else if (taskId) {
+    const task = await Task.findOne({ _id: taskId, deletedAt: null });
+    if (!task) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
+    }
+    project = task.project;
+  } else if (crId) {
+    const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
+    if (!cr) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Change Request not found');
+    }
+    project = cr.project;
+  } else {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
   const start = new Date(startTime);
@@ -242,9 +318,11 @@ const createManualLog = async (userId, issueId, startTime, endTime, workType, no
   const duration = parseFloat((diffMins / 60).toFixed(2));
 
   const timeLog = await TimeLog.create({
-    issue: issueId,
+    issue: issueId || null,
+    task: taskId || null,
+    cr: crId || null,
     user: userId,
-    project: issue.project,
+    project,
     startTime: start,
     endTime: end,
     duration,
@@ -254,21 +332,39 @@ const createManualLog = async (userId, issueId, startTime, endTime, workType, no
     approved: false, // Managers must approve
   });
 
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
-  });
+  // Trigger time limit exceeded check in a non-blocking block (only for issues)
+  if (issueId) {
+    Promise.resolve().then(() => {
+      checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
+    });
+  }
 
   // E1: Notify project managers that a manual time log has been submitted
   Promise.resolve().then(async () => {
     try {
       const notificationService = require('../system/notification.service');
-      const issue = await Issue.findById(issueId).populate('project');
+      let itemName = 'an item';
+      let typeLabel = 'item';
+      let relatedLink = `/projects/${project}`;
+
+      if (issueId) {
+        const issue = await Issue.findById(issueId);
+        itemName = issue ? issue.title : 'an issue';
+        typeLabel = 'issue';
+        relatedLink = `/issues?project=${project}`;
+      } else if (taskId) {
+        const task = await Task.findById(taskId);
+        itemName = task ? task.name : 'a task';
+        typeLabel = 'task';
+      } else if (crId) {
+        const cr = await ChangeRequest.findById(crId);
+        itemName = cr ? cr.title : 'a CR';
+        typeLabel = 'CR';
+      }
+
       const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
       const logUser = await User.findById(userId);
       const userName = logUser ? logUser.name : 'A team member';
-      const issueName = issue ? issue.title : 'an issue';
-      const projectId = issue && issue.project ? (issue.project._id || issue.project) : '';
 
       for (const recipient of adminsAndManagers) {
         if (String(recipient._id) === String(userId)) continue;
@@ -276,11 +372,11 @@ const createManualLog = async (userId, issueId, startTime, endTime, workType, no
           recipient: recipient._id,
           sender: userId,
           title: 'Time Log Submitted',
-          message: `${userName} submitted a manual time log of ${timeLog.duration.toFixed(2)}h for "${issueName}" — pending your approval.`,
+          message: `${userName} submitted a manual time log of ${timeLog.duration.toFixed(2)}h for ${typeLabel} "${itemName}" — pending your approval.`,
           type: 'info',
           module: 'time-tracking',
           relatedId: timeLog._id,
-          relatedLink: `/issues?project=${projectId}`,
+          relatedLink,
         });
       }
     } catch (err) {
@@ -299,7 +395,7 @@ const queryTimeLogs = async (filter, options) => {
   const queryFilter = { ...filter, deletedAt: null };
   const logs = await TimeLog.paginate(queryFilter, {
     ...options,
-    populate: 'issue,user,project',
+    populate: 'issue task cr user project',
   });
   return logs;
 };
@@ -308,7 +404,7 @@ const queryTimeLogs = async (filter, options) => {
  * Get time log by ID
  */
 const getTimeLogById = async (id) => {
-  const timeLog = await TimeLog.findOne({ _id: id, deletedAt: null }).populate('issue user project');
+  const timeLog = await TimeLog.findOne({ _id: id, deletedAt: null }).populate('issue task cr user project');
   if (!timeLog) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Time log not found');
   }
@@ -409,19 +505,25 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
         const notificationService = require('../system/notification.service');
         const developerId = timeLog.user._id || timeLog.user;
         if (String(developerId) !== String(currentUserId)) {
-          const issueDoc = timeLog.issue;
-          const issueName = issueDoc && issueDoc.title ? issueDoc.title : 'an issue';
+          let itemName = 'an item';
+          if (timeLog.issue) {
+            itemName = timeLog.issue.title || 'an issue';
+          } else if (timeLog.task) {
+            itemName = timeLog.task.name || 'a task';
+          } else if (timeLog.cr) {
+            itemName = timeLog.cr.title || 'a CR';
+          }
           const projectId = timeLog.project._id || timeLog.project;
           const status = currentApproved ? 'approved' : 'rejected';
           await notificationService.createNotification({
             recipient: developerId,
             sender: currentUserId,
             title: `Time Log ${currentApproved ? 'Approved' : 'Rejected'}`,
-            message: `Your time log for "${issueName}" has been ${status} by a manager.`,
+            message: `Your time log for "${itemName}" has been ${status} by a manager.`,
             type: currentApproved ? 'success' : 'warning',
             module: 'time-tracking',
             relatedId: timeLog._id,
-            relatedLink: `/issues?project=${projectId}`,
+            relatedLink: timeLog.issue ? `/issues?project=${projectId}` : `/projects/${projectId}`,
           });
         }
       } catch (err) {
@@ -431,10 +533,12 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
     });
   }
 
-  const issueId = timeLog.issue._id || timeLog.issue;
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, timeLog.duration, previousDuration, currentUserId);
-  });
+  if (timeLog.issue) {
+    const issueId = timeLog.issue._id || timeLog.issue;
+    Promise.resolve().then(() => {
+      checkAndNotifyTimeExceeded(issueId, timeLog.duration, previousDuration, currentUserId);
+    });
+  }
 
   return timeLog;
 };

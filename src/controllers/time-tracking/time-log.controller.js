@@ -4,22 +4,24 @@ const { timeLogService } = require('../../services');
 const pick = require('../../utils/pick');
 
 const startTimer = catchAsync(async (req, res) => {
-  const { issueId, workType, note, isBillable } = req.body;
-  const timeLog = await timeLogService.startTimer(req.user._id, issueId, workType, note, isBillable);
+  const { issueId, taskId, crId, workType, note, isBillable } = req.body;
+  const timeLog = await timeLogService.startTimer(req.user._id, issueId, taskId, crId, workType, note, isBillable);
   res.status(httpStatus.CREATED).send(timeLog);
 });
 
 const stopTimer = catchAsync(async (req, res) => {
-  const { issueId, note } = req.body;
-  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, note);
+  const { issueId, taskId, crId, note } = req.body;
+  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, taskId, crId, note);
   res.status(httpStatus.OK).send(timeLog);
 });
 
 const createManualLog = catchAsync(async (req, res) => {
-  const { issueId, startTime, endTime, workType, note, isBillable } = req.body;
+  const { issueId, taskId, crId, startTime, endTime, workType, note, isBillable } = req.body;
   const timeLog = await timeLogService.createManualLog(
     req.user._id,
     issueId,
+    taskId,
+    crId,
     startTime,
     endTime,
     workType,
@@ -30,7 +32,7 @@ const createManualLog = catchAsync(async (req, res) => {
 });
 
 const getTimeLogs = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['issue', 'user', 'project', 'approved']);
+  const filter = pick(req.query, ['issue', 'task', 'cr', 'user', 'project', 'approved']);
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await timeLogService.queryTimeLogs(filter, options);
   res.status(httpStatus.OK).send(result);
