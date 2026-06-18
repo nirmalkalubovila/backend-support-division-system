@@ -2,6 +2,8 @@ const httpStatus = require('http-status');
 const mongoose = require('mongoose');
 const { TimeLog, Issue, Project, User, Task, ChangeRequest } = require('../../models');
 const ApiError = require('../../utils/ApiError');
+const { getIO } = require('../../config/socket');
+const logger = require('../../config/logger');
 
 /**
  * Recalculate project total used hours based on approved time logs
@@ -116,10 +118,15 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
-  // Check if user already has any active timer
-  const activeLog = await TimeLog.findOne({ user: userId, endTime: null, deletedAt: null });
+  // Check if user already has an active timer for this specific item
+  const query = { user: userId, endTime: null, deletedAt: null };
+  if (issueId) query.issue = issueId;
+  else if (taskId) query.task = taskId;
+  else if (crId) query.cr = crId;
+
+  const activeLog = await TimeLog.findOne(query);
   if (activeLog) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'You already have an active running timer. Please pause or stop it first.');
+    throw new ApiError(httpStatus.BAD_REQUEST, 'You already have an active running timer for this item.');
   }
 
   const timeLog = await TimeLog.create({
@@ -156,6 +163,23 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     }
   }
 
+  // Emit WebSocket event
+  try {
+    const io = getIO();
+    if (io) {
+      const itemId = issueId || taskId || crId;
+      io.to(`user:${userId}`).emit('timer:started', {
+        itemId: String(itemId),
+        workType,
+        startTime: timeLog.startTime,
+        timeLog: timeLog.toJSON ? timeLog.toJSON() : timeLog,
+      });
+      logger.info(`WebSocket timer:started emitted to user:${userId} for item ${itemId}`);
+    }
+  } catch (error) {
+    logger.error('Failed to emit timer:started via WebSocket', { error: error.message });
+  }
+
   return timeLog;
 };
 
@@ -178,6 +202,20 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
   const diffMins = diffMs / (1000 * 60);
 
   if (diffMins < 5) {
+    const itemId = activeLog.issue || activeLog.task || activeLog.cr;
+    // Emit WebSocket event before discard
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`user:${userId}`).emit('timer:stopped', {
+          itemId: String(itemId),
+          discarded: true,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
+    }
+
     // Minimum duration: 5 minutes. Reject and discard the log to avoid clutter.
     await activeLog.deleteOne();
     throw new ApiError(httpStatus.BAD_REQUEST, 'Time log duration is less than 5 minutes. The session has been discarded.');
@@ -195,6 +233,22 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
   activeLog.note = finalNote;
 
   await activeLog.save();
+
+  // Emit WebSocket event
+  try {
+    const io = getIO();
+    if (io) {
+      const itemId = activeLog.issue || activeLog.task || activeLog.cr;
+      io.to(`user:${userId}`).emit('timer:stopped', {
+        itemId: String(itemId),
+        discarded: false,
+        timeLog: activeLog.toJSON ? activeLog.toJSON() : activeLog,
+      });
+      logger.info(`WebSocket timer:stopped emitted to user:${userId} for item ${itemId}`);
+    }
+  } catch (error) {
+    logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
+  }
 
   // Auto-transition issue to Testing
   await Issue.updateOne({ _id: issueId }, { status: 'Testing' });
@@ -308,18 +362,22 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
     throw new ApiError(httpStatus.BAD_REQUEST, 'Single time log entry cannot exceed 12 hours');
   }
 
-  // Check for overlaps for this user
-  const overlappingLog = await TimeLog.findOne({
+  // Check for overlaps for this user on this specific item
+  const overlapQuery = {
     user: userId,
     deletedAt: null,
     $or: [
       { startTime: { $lt: end }, endTime: { $gt: start } },
       { startTime: { $lt: end }, endTime: null },
     ],
-  });
+  };
+  if (issueId) overlapQuery.issue = issueId;
+  else if (taskId) overlapQuery.task = taskId;
+  else if (crId) overlapQuery.cr = crId;
 
+  const overlappingLog = await TimeLog.findOne(overlapQuery);
   if (overlappingLog) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Manual time log overlaps with an existing time log or active timer.');
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Manual time log overlaps with an existing time log or active timer for this item.');
   }
 
   const duration = parseFloat((diffMins / 60).toFixed(2));
@@ -400,6 +458,13 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
  */
 const queryTimeLogs = async (filter, options) => {
   const queryFilter = { ...filter, deletedAt: null };
+  if (queryFilter.active === 'true' || queryFilter.active === true) {
+    queryFilter.endTime = null;
+    delete queryFilter.active;
+  } else if (queryFilter.active === 'false' || queryFilter.active === false) {
+    queryFilter.endTime = { $ne: null };
+    delete queryFilter.active;
+  }
   const logs = await TimeLog.paginate(queryFilter, {
     ...options,
     populate: 'issue task cr user project',

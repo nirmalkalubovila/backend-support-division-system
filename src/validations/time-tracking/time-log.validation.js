@@ -58,6 +58,7 @@ const getLogs = {
     user: Joi.string(),
     project: Joi.string(),
     approved: Joi.boolean(),
+    active: Joi.boolean(),
     sortBy: Joi.string(),
     limit: Joi.number().integer(),
     page: Joi.number().integer(),
