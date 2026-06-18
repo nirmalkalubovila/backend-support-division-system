@@ -2,31 +2,37 @@ const Joi = require('joi');
 
 const startTimer = {
   body: Joi.object().keys({
-    issueId: Joi.string().required(),
+    issueId: Joi.string().allow('', null),
+    taskId: Joi.string().allow('', null),
+    crId: Joi.string().allow('', null),
     workType: Joi.string().valid('Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client').required(),
     note: Joi.string().allow(''),
     isBillable: Joi.boolean().default(true),
-  }),
+  }).or('issueId', 'taskId', 'crId'),
 };
-
+ 
 const stopTimer = {
   body: Joi.object().keys({
-    issueId: Joi.string().required(),
+    issueId: Joi.string().allow('', null),
+    taskId: Joi.string().allow('', null),
+    crId: Joi.string().allow('', null),
     note: Joi.string().allow(''),
-  }),
+  }).or('issueId', 'taskId', 'crId'),
 };
-
+ 
 const createManualLog = {
   body: Joi.object().keys({
-    issueId: Joi.string().required(),
+    issueId: Joi.string().allow('', null),
+    taskId: Joi.string().allow('', null),
+    crId: Joi.string().allow('', null),
     startTime: Joi.date().iso().required(),
     endTime: Joi.date().iso().required(),
     workType: Joi.string().valid('Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client').required(),
     note: Joi.string().allow(''),
     isBillable: Joi.boolean().default(true),
-  }),
+  }).or('issueId', 'taskId', 'crId'),
 };
-
+ 
 const updateLog = {
   params: Joi.object().keys({
     logId: Joi.string().required(),
@@ -43,10 +49,12 @@ const updateLog = {
     })
     .min(1),
 };
-
+ 
 const getLogs = {
   query: Joi.object().keys({
     issue: Joi.string(),
+    task: Joi.string(),
+    cr: Joi.string(),
     user: Joi.string(),
     project: Joi.string(),
     approved: Joi.boolean(),

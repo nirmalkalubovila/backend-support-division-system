@@ -24,6 +24,41 @@ const createCR = async (body, userId) => {
     status: body.status || 'Submitted',
     timeline: [{ fromStatus: null, toStatus: body.status || 'Submitted', changedBy: userId, note: 'CR created' }],
   });
+
+  // Trigger assignment notifications
+  try {
+    const notificationService = require('../system/notification.service');
+    if (cr.assignedProjectManager) {
+      await notificationService.createNotification({
+        recipient: cr.assignedProjectManager,
+        sender: userId,
+        title: 'New CR Assigned',
+        message: `You have been assigned as the Project Manager for CR: ${cr.title} (${cr.crNumber}).`,
+        type: 'info',
+        module: 'crs',
+        relatedId: cr._id,
+        relatedLink: `/projects/${cr.project}`,
+      });
+    }
+    if (cr.assignedDevelopers && cr.assignedDevelopers.length > 0) {
+      for (const devId of cr.assignedDevelopers) {
+        await notificationService.createNotification({
+          recipient: devId,
+          sender: userId,
+          title: 'New CR Assigned',
+          message: `You have been assigned to CR: ${cr.title} (${cr.crNumber}).`,
+          type: 'info',
+          module: 'crs',
+          relatedId: cr._id,
+          relatedLink: `/projects/${cr.project}`,
+        });
+      }
+    }
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to send CR creation notifications', { error: err.message });
+  }
+
   return cr.populate('assignedProjectManager assignedDevelopers createdBy', 'name email role avatar');
 };
 
@@ -50,12 +85,54 @@ const updateCRById = async (crId, updateBody, userId) => {
   const prevStatus = cr.status;
   const statusChanged = updateBody.status && updateBody.status !== prevStatus;
 
+  // Track old assignments
+  const oldDevelopers = cr.assignedDevelopers ? cr.assignedDevelopers.map(d => (d._id || d).toString()) : [];
+  const oldPM = cr.assignedProjectManager ? (cr.assignedProjectManager._id || cr.assignedProjectManager).toString() : null;
+
   if (statusChanged) {
     cr.timeline.push({ fromStatus: prevStatus, toStatus: updateBody.status, changedBy: userId, note: updateBody.statusNote || null });
     delete updateBody.statusNote;
   }
   Object.assign(cr, updateBody);
   await cr.save();
+
+  // Detect newly added PM and developers
+  const newPM = cr.assignedProjectManager ? (cr.assignedProjectManager._id || cr.assignedProjectManager).toString() : null;
+  const newDevelopers = cr.assignedDevelopers ? cr.assignedDevelopers.map(d => (d._id || d).toString()) : [];
+
+  const pmAssigned = newPM && oldPM !== newPM;
+  const newlyAddedDevs = newDevelopers.filter(id => !oldDevelopers.includes(id));
+
+  try {
+    const notificationService = require('../system/notification.service');
+    if (pmAssigned) {
+      await notificationService.createNotification({
+        recipient: newPM,
+        sender: userId,
+        title: 'CR Assigned',
+        message: `You have been assigned as the Project Manager for CR: ${cr.title} (${cr.crNumber}).`,
+        type: 'info',
+        module: 'crs',
+        relatedId: cr._id,
+        relatedLink: `/projects/${cr.project}`,
+      });
+    }
+    for (const devId of newlyAddedDevs) {
+      await notificationService.createNotification({
+        recipient: devId,
+        sender: userId,
+        title: 'CR Assigned',
+        message: `You have been assigned to CR: ${cr.title} (${cr.crNumber}).`,
+        type: 'info',
+        module: 'crs',
+        relatedId: cr._id,
+        relatedLink: `/projects/${cr.project}`,
+      });
+    }
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to trigger CR assignment notification on update', { error: err.message });
+  }
 
   // Send notifications if status changed
   if (statusChanged) {

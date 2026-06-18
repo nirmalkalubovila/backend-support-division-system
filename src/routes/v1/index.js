@@ -13,6 +13,8 @@ const crRoute = require('./projects/crs/cr.route');
 const issueRoute = require('./issues/issue.route');
 const timeLogRoute = require('./time-tracking/time-log.route');
 const notificationRoute = require('./system/notification.route');
+const globalTaskRoute = require('./projects/tasks/global-task.route');
+const globalCrRoute = require('./projects/crs/global-cr.route');
 const { router: paymentRoute, globalRouter: financeRoute } = require('./projects/payments/payment.route');
 
 const router = express.Router();
@@ -31,6 +33,8 @@ const defaultRoutes = [
   { path: '/issues',   route: issueRoute },
   { path: '/time-logs', route: timeLogRoute },
   { path: '/notifications', route: notificationRoute },
+  { path: '/tasks',    route: globalTaskRoute },
+  { path: '/crs',      route: globalCrRoute },
   { path: '/finance',  route: financeRoute },
 ];
 
