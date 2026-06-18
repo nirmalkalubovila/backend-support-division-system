@@ -156,6 +156,9 @@ const stopTimer = async (userId, issueId, note = '') => {
 
   await activeLog.save();
 
+  // Auto-transition issue to Testing
+  await Issue.updateOne({ _id: issueId }, { status: 'Testing' });
+
   // Trigger time limit exceeded check in a non-blocking block
   Promise.resolve().then(() => {
     checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
