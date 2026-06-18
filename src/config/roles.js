@@ -9,6 +9,9 @@ const roleRights = new Map();
 // Intern — minimal: can only view own issues, log time
 roleRights.set('intern', [
   'issues.issue.read',
+  'projects.project.read',
+  'projects.task.read',
+  'projects.cr.read',
   'time_tracking.time_log.create',
   'time_tracking.time_log.read',
   'reports.user_performance.read',
