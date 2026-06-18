@@ -1,5 +1,6 @@
 const httpStatus = require('http-status');
-const { Project, Client, User } = require('../../models');
+const mongoose = require('mongoose');
+const { Project, Client, User, TimeLog } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
 const createProject = async (projectBody) => {
@@ -37,6 +38,43 @@ const createProject = async (projectBody) => {
 
 const queryProjects = async (filter, options) => {
   const projects = await Project.paginate({ ...filter, deletedAt: null }, { ...options, populate: 'client,members' });
+
+  // Dynamically compute live usedHours from approved TimeLogs so the
+  // dashboard always reflects the true burned time regardless of
+  // whether the cached project.usedHours was properly updated.
+  if (projects.data && projects.data.length > 0) {
+    const projectIds = projects.data.map((p) => new mongoose.Types.ObjectId(p._id || p.id));
+
+    const usedHoursAgg = await TimeLog.aggregate([
+      {
+        $match: {
+          project: { $in: projectIds },
+          deletedAt: null,
+        },
+      },
+      {
+        $group: {
+          _id: '$project',
+          totalHours: { $sum: '$duration' },
+        },
+      },
+    ]);
+
+    // Build a map of projectId -> totalHours for O(1) lookup
+    const hoursMap = {};
+    usedHoursAgg.forEach((entry) => {
+      hoursMap[String(entry._id)] = parseFloat(entry.totalHours.toFixed(2));
+    });
+
+    // Merge live usedHours onto each project result.
+    // We mutate the usedHours field directly on the Mongoose document so that
+    // the toJSON plugin still runs correctly when res.send() serializes the response.
+    projects.data.forEach((project) => {
+      const id = String(project._id || project.id);
+      project.usedHours = hoursMap[id] !== undefined ? hoursMap[id] : 0;
+    });
+  }
+
   return projects;
 };
 

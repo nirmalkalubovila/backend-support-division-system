@@ -15,7 +15,6 @@ const updateProjectUsedHours = async (projectId) => {
     {
       $match: {
         project: new mongoose.Types.ObjectId(projectId),
-        approved: true,
         deletedAt: null,
       },
     },
@@ -118,27 +117,17 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
-  // Auto-stop any previously running timer for this user so they can switch items seamlessly
-  const activeLog = await TimeLog.findOne({ user: userId, endTime: null, deletedAt: null });
-  if (activeLog) {
-    const autoEndTime = new Date();
-    const diffMs = autoEndTime - activeLog.startTime;
-    const diffMins = diffMs / (1000 * 60);
-    if (diffMins >= 5) {
-      // Only save if at least 5 minutes – otherwise just discard
-      const autoDuration = Math.min(parseFloat((diffMins / 60).toFixed(2)), 12);
-      const autoNote = activeLog.note
-        ? `${activeLog.note} [Auto-stopped: new timer started]`
-        : '[Auto-stopped: new timer started]';
-      // Use updateOne to avoid Mongoose re-validating legacy fields (e.g. old workType values)
-      await TimeLog.updateOne(
-        { _id: activeLog._id },
-        { $set: { endTime: autoEndTime, duration: autoDuration, note: autoNote } }
-      );
-    } else {
-      // Session too short – discard it cleanly
-      await TimeLog.deleteOne({ _id: activeLog._id });
-    }
+  // Clean up any existing active timers for the exact same item to avoid duplicates
+  const existingQuery = { user: userId, endTime: null, deletedAt: null };
+  if (issueId) existingQuery.issue = issueId;
+  else if (taskId) existingQuery.task = taskId;
+  else if (crId) existingQuery.cr = crId;
+
+  const existingLogs = await TimeLog.find(existingQuery);
+  if (existingLogs.length > 0) {
+    const duplicateIds = existingLogs.map(log => log._id);
+    await TimeLog.deleteMany({ _id: { $in: duplicateIds } });
+    logger.info(`Cleaned up ${duplicateIds.length} existing active log(s) for the same item before starting a new one`);
   }
 
   const timeLog = await TimeLog.create({
@@ -198,20 +187,34 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
 /**
  * Stop active stopwatch timer for a user
  */
-const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
+const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuration = null) => {
   const query = { user: userId, endTime: null, deletedAt: null };
   if (issueId) query.issue = issueId;
   else if (taskId) query.task = taskId;
   else if (crId) query.cr = crId;
 
-  const activeLog = await TimeLog.findOne(query);
-  if (!activeLog) {
+  const activeLogs = await TimeLog.find(query);
+  if (activeLogs.length === 0) {
     throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running for this item and user');
   }
 
+  // Use the first active log to store the time, and clean up the rest to resolve duplicate/orphaned active logs
+  const activeLog = activeLogs[0];
+  if (activeLogs.length > 1) {
+    const duplicateIds = activeLogs.slice(1).map(log => log._id);
+    await TimeLog.deleteMany({ _id: { $in: duplicateIds } });
+    logger.info(`Cleaned up ${duplicateIds.length} duplicate active logs for user ${userId} on item ${issueId || taskId || crId}`);
+  }
+
   const endTime = new Date();
-  const diffMs = endTime - activeLog.startTime;
-  const diffMins = diffMs / (1000 * 60);
+  let diffMins;
+
+  if (activeDuration !== null && activeDuration !== undefined && activeDuration !== '') {
+    diffMins = Number(activeDuration) / 60;
+  } else {
+    const diffMs = endTime - activeLog.startTime;
+    diffMins = diffMs / (1000 * 60);
+  }
 
   if (diffMins < 5) {
     const itemId = activeLog.issue || activeLog.task || activeLog.cr;
@@ -246,6 +249,22 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
 
   await activeLog.save();
 
+  // Recalculate project total used hours
+  await updateProjectUsedHours(activeLog.project);
+
+  // Trigger project budget threshold check
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(activeLog.project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
+      }
+    } catch (err) {
+      logger.error('Failed to check budget thresholds after timer stop', { error: err.message });
+    }
+  });
+
   // Emit WebSocket event
   try {
     const io = getIO();
@@ -262,20 +281,17 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
     logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
   }
 
-  // Auto-transition issue to Testing
-  await Issue.updateOne({ _id: issueId }, { status: 'Testing' });
-
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
-  });
-  // Trigger time limit exceeded check in a non-blocking block (only for issues)
+  // Auto-transition item status when timer stops
   if (activeLog.issue) {
     await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
     // Trigger time limit exceeded check (only for issues)
     Promise.resolve().then(() => {
       checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
     });
+  } else if (activeLog.task) {
+    await Task.updateOne({ _id: activeLog.task }, { status: 'Review' });
+  } else if (activeLog.cr) {
+    await ChangeRequest.updateOne({ _id: activeLog.cr }, { status: 'Submitted' });
   }
 
   // E1: Notify project managers that a time log has been submitted for review
@@ -409,6 +425,22 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
     note,
     isBillable,
     approved: false, // Managers must approve
+  });
+
+  // Recalculate project total used hours
+  await updateProjectUsedHours(project);
+
+  // Trigger project budget threshold check
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
+      }
+    } catch (err) {
+      logger.error('Failed to check budget thresholds after manual log creation', { error: err.message });
+    }
   });
 
   // Trigger time limit exceeded check in a non-blocking block (only for issues)
@@ -565,24 +597,22 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
 
   await timeLog.save();
 
-  // If approval status was modified, update project stats
+  // Recalculate project stats
   await updateProjectUsedHours(timeLog.project._id);
 
   // B3/B4: Check project budget thresholds after hour recalculation
-  if (approvalChanged && currentApproved) {
-    Promise.resolve().then(async () => {
-      try {
-        const projectDoc = await Project.findById(timeLog.project._id || timeLog.project);
-        if (projectDoc) {
-          const projectService = require('../project-management/project.service');
-          await projectService.checkBudgetThresholds(projectDoc);
-        }
-      } catch (err) {
-        const logger = require('../../config/logger');
-        logger.error('Failed to check budget thresholds', { error: err.message });
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(timeLog.project._id || timeLog.project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
       }
-    });
-  }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to check budget thresholds', { error: err.message });
+    }
+  });
 
   // E2: Notify the developer when their time log is approved/rejected
   if (approvalChanged) {

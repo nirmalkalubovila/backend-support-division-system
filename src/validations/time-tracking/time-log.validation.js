@@ -17,6 +17,7 @@ const stopTimer = {
     taskId: Joi.string().allow('', null),
     crId: Joi.string().allow('', null),
     note: Joi.string().allow(''),
+    activeDuration: Joi.number().min(0).allow(null, ''),
   }).or('issueId', 'taskId', 'crId'),
 };
  

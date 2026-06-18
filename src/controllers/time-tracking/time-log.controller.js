@@ -10,8 +10,8 @@ const startTimer = catchAsync(async (req, res) => {
 });
 
 const stopTimer = catchAsync(async (req, res) => {
-  const { issueId, taskId, crId, note } = req.body;
-  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, taskId, crId, note);
+  const { issueId, taskId, crId, note, activeDuration } = req.body;
+  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, taskId, crId, note, activeDuration);
   res.status(httpStatus.OK).send(timeLog);
 });
 
