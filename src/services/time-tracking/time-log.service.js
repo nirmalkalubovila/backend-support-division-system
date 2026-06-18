@@ -116,10 +116,27 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
-  // Check if user already has any active timer
+  // Auto-stop any previously running timer for this user so they can switch items seamlessly
   const activeLog = await TimeLog.findOne({ user: userId, endTime: null, deletedAt: null });
   if (activeLog) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'You already have an active running timer. Please pause or stop it first.');
+    const autoEndTime = new Date();
+    const diffMs = autoEndTime - activeLog.startTime;
+    const diffMins = diffMs / (1000 * 60);
+    if (diffMins >= 5) {
+      // Only save if at least 5 minutes – otherwise just discard
+      const autoDuration = Math.min(parseFloat((diffMins / 60).toFixed(2)), 12);
+      const autoNote = activeLog.note
+        ? `${activeLog.note} [Auto-stopped: new timer started]`
+        : '[Auto-stopped: new timer started]';
+      // Use updateOne to avoid Mongoose re-validating legacy fields (e.g. old workType values)
+      await TimeLog.updateOne(
+        { _id: activeLog._id },
+        { $set: { endTime: autoEndTime, duration: autoDuration, note: autoNote } }
+      );
+    } else {
+      // Session too short – discard it cleanly
+      await TimeLog.deleteOne({ _id: activeLog._id });
+    }
   }
 
   const timeLog = await TimeLog.create({
@@ -196,15 +213,10 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
 
   await activeLog.save();
 
-  // Auto-transition issue to Testing
-  await Issue.updateOne({ _id: issueId }, { status: 'Testing' });
-
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
-  });
-  // Trigger time limit exceeded check in a non-blocking block (only for issues)
+  // Auto-transition issue to Testing (only when this is an issue log)
   if (activeLog.issue) {
+    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
+    // Trigger time limit exceeded check (only for issues)
     Promise.resolve().then(() => {
       checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
     });
