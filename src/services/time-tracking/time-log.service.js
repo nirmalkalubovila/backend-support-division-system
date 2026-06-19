@@ -51,7 +51,7 @@ const updateProjectUsedHours = async (projectId) => {
     {
       $match: {
         project: new mongoose.Types.ObjectId(projectId),
-        approved: true,
+        endTime: { $ne: null },
         deletedAt: null,
       },
     },
@@ -274,6 +274,9 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
 
   await activeLog.save();
 
+  // Update project used hours immediately after saving the log
+  await updateProjectUsedHours(activeLog.project);
+
   // Auto-transition issue to Review
   if (activeLog.issue) {
     await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
@@ -440,6 +443,9 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
       checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
     });
   }
+
+  // Update project used hours
+  await updateProjectUsedHours(project);
 
   // E1: Notify project managers that a manual time log has been submitted
   Promise.resolve().then(async () => {
