@@ -1,7 +1,7 @@
 const Joi = require('joi');
 
 const CR_TYPES = ['Enhancement', 'New Feature', 'Modification', 'Integration', 'UI/UX Change', 'Data Change', 'Bug Fix', 'Other'];
-const CR_STATUSES = ['To Do', 'Rejected', 'In Progress', 'Review', 'Done', 'Closed'];
+const CR_STATUSES = ['To Do', 'In Progress', 'Review', 'Done'];
 const PRIORITIES = ['Critical', 'High', 'Medium', 'Low'];
 
 const createCR = {
@@ -69,6 +69,16 @@ const updateCR = {
     risks: Joi.string().allow('', null),
     relatedLinks: Joi.array().items(Joi.object({ label: Joi.string().allow(''), url: Joi.string().allow('') })),
     order: Joi.number(),
+    isReopened: Joi.boolean(),
+    submittedForReview: Joi.boolean(),
+    reopenReason: Joi.string().allow(null, ''),
+    reassignRequest: Joi.object().keys({
+      requestedTo: Joi.string().allow(null),
+      reason: Joi.string().allow(null, ''),
+      requestedBy: Joi.string().allow(null),
+      status: Joi.string().valid('Pending', 'Approved', 'Rejected').allow(null),
+      requestedAt: Joi.date().allow(null),
+    }).allow(null),
   }).min(1),
 };
 

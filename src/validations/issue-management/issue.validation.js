@@ -81,6 +81,16 @@ const updateIssue = {
         hours: Joi.number().min(0.1).required(),
         reason: Joi.string().required().max(1000),
       }).allow(null),
+      isReopened: Joi.boolean(),
+      submittedForReview: Joi.boolean(),
+      reopenReason: Joi.string().allow(null, ''),
+      reassignRequest: Joi.object().keys({
+        requestedTo: Joi.string().allow(null),
+        reason: Joi.string().allow(null, ''),
+        requestedBy: Joi.string().allow(null),
+        status: Joi.string().valid('Pending', 'Approved', 'Rejected').allow(null),
+        requestedAt: Joi.date().allow(null),
+      }).allow(null),
     })
     .min(1),
 };

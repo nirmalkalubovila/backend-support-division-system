@@ -131,27 +131,32 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
   await autoStopExceededTimers();
   let project = null;
 
+  let isReopened = false;
+
   if (issueId) {
     const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
     if (!issue) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
     }
-    if (issue.status === 'To Do' || issue.status === 'Closed' || issue.status === 'Done') {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for To Do, Done or Closed issues');
+    if (issue.status === 'Closed' || issue.status === 'Done') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Done or Closed issues');
     }
     project = issue.project;
+    isReopened = !!issue.isReopened;
   } else if (taskId) {
     const task = await Task.findOne({ _id: taskId, deletedAt: null });
     if (!task) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
     }
     project = task.project;
+    isReopened = !!task.isReopened;
   } else if (crId) {
     const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
     if (!cr) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Change Request not found');
     }
     project = cr.project;
+    isReopened = !!cr.isReopened;
   } else {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
@@ -169,6 +174,13 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     logger.info(`Cleaned up ${duplicateIds.length} existing active log(s) for the same item before starting a new one`);
   }
 
+  let finalWorkType = workType;
+  let finalNote = note;
+  if (isReopened) {
+    finalWorkType = 'Reopened';
+    finalNote = note ? `${note} [Reopened issue fixing]` : 'Reopened issue fixing';
+  }
+
   const timeLog = await TimeLog.create({
     issue: issueId || null,
     task: taskId || null,
@@ -176,31 +188,24 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     user: userId,
     project,
     startTime: new Date(),
-    workType,
-    note,
+    workType: finalWorkType,
+    note: finalNote,
     isBillable,
     approved: false, // Must be approved by manager later
   });
 
   // Auto-transitions
+  let statusToSet = finalWorkType;
+  if (finalWorkType === 'Reopened') {
+    statusToSet = 'In Progress';
+  }
+
   if (issueId) {
-    const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
-    if (issue && issue.status !== 'In Progress') {
-      issue.status = 'In Progress';
-      await issue.save();
-    }
+    await Issue.updateOne({ _id: issueId }, { status: statusToSet });
   } else if (taskId) {
-    const task = await Task.findOne({ _id: taskId, deletedAt: null });
-    if (task && task.status !== 'In Progress') {
-      task.status = 'In Progress';
-      await task.save();
-    }
+    await Task.updateOne({ _id: taskId }, { status: statusToSet });
   } else if (crId) {
-    const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
-    if (cr && cr.status !== 'In Development') {
-      cr.status = 'In Development';
-      await cr.save();
-    }
+    await ChangeRequest.updateOne({ _id: crId }, { status: statusToSet });
   }
 
   // Emit WebSocket event
@@ -320,33 +325,11 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuratio
     logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
   }
 
-  // Auto-transition item status when timer stops
-  // Auto-transition issue to Testing
-  if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
-  }
-
-  // Auto-transition task to Review
-  if (activeLog.task) {
-    await Task.updateOne({ _id: activeLog.task, status: { $ne: 'Done' } }, { status: 'Review' });
-  }
-
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
-  });
   // Trigger time limit exceeded check in a non-blocking block (only for issues)
-  // Auto-transition issue to Review (only when this is an issue log)
   if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
-    // Trigger time limit exceeded check (only for issues)
     Promise.resolve().then(() => {
       checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
     });
-  } else if (activeLog.task) {
-    await Task.updateOne({ _id: activeLog.task }, { status: 'Review' });
-  } else if (activeLog.cr) {
-    await ChangeRequest.updateOne({ _id: activeLog.cr }, { status: 'Submitted' });
   }
 
   // E1: Notify project managers that a time log has been submitted for review

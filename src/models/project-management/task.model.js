@@ -55,6 +55,25 @@ const taskSchema = new mongoose.Schema(
     relatedLinks: [{ label: String, url: String }],
     attachments: [taskAttachmentSchema],
     order: { type: Number, default: 0 },
+    isReopened: {
+      type: Boolean,
+      default: false,
+    },
+    submittedForReview: {
+      type: Boolean,
+      default: false,
+    },
+    reopenReason: {
+      type: String,
+      default: null,
+    },
+    reassignRequest: {
+      requestedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      reason: { type: String, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: null },
+      requestedAt: { type: Date, default: null },
+    },
     deletedAt: { type: Date, default: null },
     totalTimeSpent: {
       type: Number,
