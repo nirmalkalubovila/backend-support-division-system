@@ -52,8 +52,11 @@ const issueSchema = new mongoose.Schema(
         'Resolved',
         'Closed',
         'Reopened',
+        'To Do',
+        'Review',
+        'Done',
       ],
-      default: 'Backlog',
+      default: 'To Do',
     },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,

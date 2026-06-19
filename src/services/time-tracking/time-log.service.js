@@ -96,8 +96,8 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     if (!issue) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
     }
-    if (issue.status === 'Backlog' || issue.status === 'Closed') {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+    if (issue.status === 'To Do' || issue.status === 'Closed' || issue.status === 'Done') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for To Do, Done or Closed issues');
     }
     project = issue.project;
   } else if (taskId) {
@@ -213,9 +213,9 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
 
   await activeLog.save();
 
-  // Auto-transition issue to Testing
+  // Auto-transition issue to Review
   if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
+    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
   }
 
   // Auto-transition task to Review
@@ -228,9 +228,9 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
     checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
   });
   // Trigger time limit exceeded check in a non-blocking block (only for issues)
-  // Auto-transition issue to Testing (only when this is an issue log)
+  // Auto-transition issue to Review (only when this is an issue log)
   if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
+    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
     // Trigger time limit exceeded check (only for issues)
     Promise.resolve().then(() => {
       checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
@@ -297,8 +297,8 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
     if (!issue) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
     }
-    if (issue.status === 'Backlog' || issue.status === 'Closed') {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Backlog or Closed issues');
+    if (issue.status === 'To Do' || issue.status === 'Closed' || issue.status === 'Done') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for To Do, Done or Closed issues');
     }
     project = issue.project;
   } else if (taskId) {
