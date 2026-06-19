@@ -71,6 +71,11 @@ const projectSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    stage: {
+      type: String,
+      enum: ['development', 'support'],
+      default: 'development',
+    },
     isActive: {
       type: Boolean,
       default: true,
