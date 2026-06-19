@@ -155,27 +155,35 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
-  // Auto-stop any previously running timer for this user so they can switch items seamlessly
-  const activeLog = await TimeLog.findOne({ user: userId, endTime: null, deletedAt: null });
-  if (activeLog) {
-    const autoEndTime = new Date();
-    const diffMs = autoEndTime - activeLog.startTime;
-    const diffMins = diffMs / (1000 * 60);
-    if (diffMins >= 5) {
-      // Only save if at least 5 minutes – otherwise just discard
-      const autoDuration = Math.min(parseFloat((diffMins / 60).toFixed(2)), 12);
-      const autoNote = activeLog.note
-        ? `${activeLog.note} [Auto-stopped: new timer started]`
-        : '[Auto-stopped: new timer started]';
-      // Use updateOne to avoid Mongoose re-validating legacy fields (e.g. old workType values)
-      await TimeLog.updateOne(
-        { _id: activeLog._id },
-        { $set: { endTime: autoEndTime, duration: autoDuration, note: autoNote } }
+  // Support stage: enforce monthly allocation hours
+  const projectDoc = await Project.findById(project);
+  if (projectDoc && projectDoc.stage === 'support' && projectDoc.allocatedHours > 0) {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const monthlyAgg = await TimeLog.aggregate([
+      { $match: { project: projectDoc._id, deletedAt: null, startTime: { $gte: monthStart, $lt: monthEnd } } },
+      { $group: { _id: null, total: { $sum: '$duration' } } },
+    ]);
+    const monthlyUsed = monthlyAgg.length > 0 ? monthlyAgg[0].total : 0;
+    if (monthlyUsed >= projectDoc.allocatedHours) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        `Monthly allocation of ${projectDoc.allocatedHours}h for this support project has been reached (${monthlyUsed.toFixed(2)}h used). No more time can be logged this month.`
       );
-    } else {
-      // Session too short – discard it cleanly
-      await TimeLog.deleteOne({ _id: activeLog._id });
     }
+  }
+
+  // Prevent duplicate active log for the same item (idempotent start)
+  const existingActiveLog = await TimeLog.findOne({
+    user: userId,
+    endTime: null,
+    deletedAt: null,
+    ...(issueId ? { issue: issueId } : taskId ? { task: taskId } : { cr: crId }),
+  });
+  if (existingActiveLog) {
+    // Timer already running for this item — return existing log
+    return existingActiveLog;
   }
 
   const timeLog = await TimeLog.create({
@@ -220,14 +228,27 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
  */
 const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
   await autoStopExceededTimers();
-  const query = { user: userId, endTime: null, deletedAt: null };
-  if (issueId) query.issue = issueId;
-  else if (taskId) query.task = taskId;
-  else if (crId) query.cr = crId;
 
-  const activeLog = await TimeLog.findOne(query);
+  // Build item-scoped query
+  const itemQuery = { user: userId, deletedAt: null };
+  if (issueId) itemQuery.issue = issueId;
+  else if (taskId) itemQuery.task = taskId;
+  else if (crId) itemQuery.cr = crId;
+
+  // 1. Try to find an active log for the specific item
+  let activeLog = await TimeLog.findOne({ ...itemQuery, endTime: null });
+
+  // 2. If no active log for this item, it was likely auto-stopped when the user
+  //    started a timer on another item simultaneously. Return the most recently
+  //    completed log for this item so the frontend can clear its state cleanly.
   if (!activeLog) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running for this item and user');
+    const completedLog = await TimeLog.findOne({ ...itemQuery, endTime: { $ne: null } })
+      .sort({ endTime: -1 });
+    if (completedLog) {
+      // Already saved — return it as-is so the frontend knows the session ended
+      return completedLog;
+    }
+    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running');
   }
 
   const endTime = new Date();
@@ -256,25 +277,14 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
   // Auto-transition issue to Review
   if (activeLog.issue) {
     await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
+    Promise.resolve().then(() => {
+      checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
+    });
   }
 
   // Auto-transition task to Review
   if (activeLog.task) {
     await Task.updateOne({ _id: activeLog.task, status: { $ne: 'Done' } }, { status: 'Review' });
-  }
-
-  // Trigger time limit exceeded check in a non-blocking block
-  Promise.resolve().then(() => {
-    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
-  });
-  // Trigger time limit exceeded check in a non-blocking block (only for issues)
-  // Auto-transition issue to Review (only when this is an issue log)
-  if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
-    // Trigger time limit exceeded check (only for issues)
-    Promise.resolve().then(() => {
-      checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
-    });
   }
 
   // E1: Notify project managers that a time log has been submitted for review
@@ -373,6 +383,24 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
 
   if (diffMins > 12 * 60) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Single time log entry cannot exceed 12 hours');
+  }
+
+  // Support stage: enforce monthly allocation hours
+  const projectDoc = await Project.findById(project);
+  if (projectDoc && projectDoc.stage === 'support' && projectDoc.allocatedHours > 0) {
+    const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+    const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    const monthlyAgg = await TimeLog.aggregate([
+      { $match: { project: projectDoc._id, deletedAt: null, startTime: { $gte: monthStart, $lt: monthEnd } } },
+      { $group: { _id: null, total: { $sum: '$duration' } } },
+    ]);
+    const monthlyUsed = monthlyAgg.length > 0 ? monthlyAgg[0].total : 0;
+    if (monthlyUsed >= projectDoc.allocatedHours) {
+      throw new ApiError(
+        httpStatus.FORBIDDEN,
+        `Monthly allocation of ${projectDoc.allocatedHours}h for this support project has been reached (${monthlyUsed.toFixed(2)}h used). No more time can be logged this month.`
+      );
+    }
   }
 
   // Check for overlaps for this user
