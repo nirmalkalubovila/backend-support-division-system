@@ -17,7 +17,7 @@ const createProject = {
     completion: Joi.number().min(0).max(100).default(0),
     startDate: Joi.date().allow(null),
     endDate: Joi.date().allow(null),
-    projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
+    projectType: Joi.array().items(Joi.string().valid('Development', 'Support')),
     mainContact: mainContactSchema,
     techStack: Joi.array().items(Joi.string()),
   }),
@@ -56,7 +56,7 @@ const updateProject = {
       completion: Joi.number().min(0).max(100),
       startDate: Joi.date().allow(null),
       endDate: Joi.date().allow(null),
-      projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
+      projectType: Joi.array().items(Joi.string().valid('Development', 'Support')),
       mainContact: mainContactSchema,
       techStack: Joi.array().items(Joi.string()),
     })
@@ -69,10 +69,17 @@ const deleteProject = {
   }),
 };
 
+const getMonthlyUsage = {
+  query: Joi.object().keys({
+    month: Joi.string().required().regex(/^\d{4}-\d{2}$/),
+  }),
+};
+
 module.exports = {
   createProject,
   getProjects,
   getProject,
   updateProject,
   deleteProject,
+  getMonthlyUsage,
 };

@@ -6,7 +6,7 @@ const { getIO } = require('../../config/socket');
 const logger = require('../../config/logger');
 
 /**
- * Recalculate project total used hours based on approved time logs
+ * Recalculate project total used hours based on all active (non-deleted) time logs
  * @param {string} projectId
  * @returns {Promise<void>}
  */

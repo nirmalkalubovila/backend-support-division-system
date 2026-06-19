@@ -3,6 +3,7 @@ const path = require('path');
 const catchAsync = require('../../utils/catchAsync');
 const { projectService } = require('../../services');
 const pick = require('../../utils/pick');
+const ApiError = require('../../utils/ApiError');
 
 const createProject = catchAsync(async (req, res) => {
   const body = { ...req.body };
@@ -82,10 +83,27 @@ const deleteProject = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
+const getMonthlyUsage = catchAsync(async (req, res) => {
+  const { month } = req.query; // YYYY-MM
+  if (!month) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'month query parameter is required (Format: YYYY-MM)');
+  }
+  const parts = month.split('-');
+  const year = parseInt(parts[0], 10);
+  const monthNum = parseInt(parts[1], 10);
+  if (isNaN(year) || isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid month format. Use YYYY-MM');
+  }
+
+  const result = await projectService.getProjectsMonthlyUsage(year, monthNum);
+  res.send(result);
+});
+
 module.exports = {
   createProject,
   getProjects,
   getProject,
   updateProject,
   deleteProject,
+  getMonthlyUsage,
 };

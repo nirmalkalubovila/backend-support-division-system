@@ -142,6 +142,63 @@ const updateProjectById = async (projectId, updateBody) => {
 };
 
 /**
+ * Get dynamic monthly used hours for a specific project
+ * @param {string} projectId
+ * @param {number} year
+ * @param {number} month - 1-indexed (1-12)
+ * @returns {Promise<number>}
+ */
+const getMonthlyUsedHours = async (projectId, year, month) => {
+  const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+  const aggregate = await TimeLog.aggregate([
+    {
+      $match: {
+        project: new mongoose.Types.ObjectId(projectId),
+        startTime: { $gte: startOfMonth, $lte: endOfMonth },
+        deletedAt: null,
+      },
+    },
+    {
+      $group: {
+        _id: '$project',
+        totalHours: { $sum: '$duration' },
+      },
+    },
+  ]);
+  return aggregate.length > 0 ? parseFloat(aggregate[0].totalHours.toFixed(2)) : 0;
+};
+
+/**
+ * Get monthly used hours for all projects in a given month
+ * @param {number} year
+ * @param {number} month - 1-indexed (1-12)
+ * @returns {Promise<Array<{projectId: string, monthlyUsedHours: number}>>}
+ */
+const getProjectsMonthlyUsage = async (year, month) => {
+  const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+  const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+  const aggregate = await TimeLog.aggregate([
+    {
+      $match: {
+        startTime: { $gte: startOfMonth, $lte: endOfMonth },
+        deletedAt: null,
+      },
+    },
+    {
+      $group: {
+        _id: '$project',
+        monthlyUsedHours: { $sum: '$duration' },
+      },
+    },
+  ]);
+  return aggregate.map((item) => ({
+    projectId: item._id.toString(),
+    monthlyUsedHours: parseFloat(item.monthlyUsedHours.toFixed(2)),
+  }));
+};
+
+/**
  * B3/B4: Check project budget thresholds and send notifications
  * Called after time log approval changes project usedHours
  * @param {Object} project - The project document
@@ -149,7 +206,19 @@ const updateProjectById = async (projectId, updateBody) => {
 const checkBudgetThresholds = async (project) => {
   if (!project || !project.allocatedHours || project.allocatedHours <= 0) return;
 
-  const usageRatio = project.usedHours / project.allocatedHours;
+  const isSupport = project.projectType && project.projectType.includes('Support');
+  let usedHours = project.usedHours;
+  let labelPrefix = 'Budget';
+
+  if (isSupport) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1; // 1-indexed
+    usedHours = await getMonthlyUsedHours(project._id, year, month);
+    labelPrefix = 'Support Hours';
+  }
+
+  const usageRatio = usedHours / project.allocatedHours;
 
   try {
     const notificationService = require('../system/notification.service');
@@ -160,8 +229,10 @@ const checkBudgetThresholds = async (project) => {
       for (const recipient of adminsAndManagers) {
         await notificationService.createNotification({
           recipient: recipient._id,
-          title: 'Budget Exceeded',
-          message: `Project "${project.name}" has exceeded its allocated hour budget. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
+          title: `${labelPrefix} Exceeded`,
+          message: isSupport
+            ? `Project "${project.name}" has exceeded its allocated monthly support hour budget. Used: ${usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`
+            : `Project "${project.name}" has exceeded its allocated hour budget. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
           type: 'error',
           module: 'projects',
           relatedId: project._id,
@@ -174,8 +245,10 @@ const checkBudgetThresholds = async (project) => {
       for (const recipient of adminsAndManagers) {
         await notificationService.createNotification({
           recipient: recipient._id,
-          title: 'Budget Warning (80%)',
-          message: `Project "${project.name}" has consumed ${Math.round(usageRatio * 100)}% of allocated hours. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
+          title: `${labelPrefix} Warning (80%)`,
+          message: isSupport
+            ? `Project "${project.name}" has consumed ${Math.round(usageRatio * 100)}% of monthly allocated support hours. Used: ${usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`
+            : `Project "${project.name}" has consumed ${Math.round(usageRatio * 100)}% of allocated hours. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
           type: 'warning',
           module: 'projects',
           relatedId: project._id,
@@ -204,4 +277,6 @@ module.exports = {
   updateProjectById,
   deleteProjectById,
   checkBudgetThresholds,
+  getMonthlyUsedHours,
+  getProjectsMonthlyUsage,
 };
