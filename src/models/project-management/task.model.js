@@ -56,6 +56,10 @@ const taskSchema = new mongoose.Schema(
     attachments: [taskAttachmentSchema],
     order: { type: Number, default: 0 },
     deletedAt: { type: Date, default: null },
+    totalTimeSpent: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

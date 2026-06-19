@@ -86,6 +86,23 @@ const getProjectTasks = async (projectId) => {
     .populate('parent', 'name')
     .populate('cr', 'crNumber title _id')
     .sort({ order: 1, createdAt: 1 });
+
+  const { TimeLog } = require('../../models');
+  const taskIds = tasks.map(task => task._id);
+  const timeLogs = await TimeLog.aggregate([
+    { $match: { task: { $in: taskIds }, deletedAt: null } },
+    { $group: { _id: '$task', totalHours: { $sum: '$duration' } } }
+  ]);
+
+  const timeLogMap = timeLogs.reduce((acc, log) => {
+    acc[log._id.toString()] = parseFloat((log.totalHours || 0).toFixed(2));
+    return acc;
+  }, {});
+
+  tasks.forEach(task => {
+    task.totalTimeSpent = timeLogMap[task._id.toString()] || 0;
+  });
+
   return tasks;
 };
 
@@ -95,6 +112,11 @@ const getTaskById = async (taskId) => {
     .populate('parent', 'name')
     .populate('cr', 'crNumber title _id');
   if (!task) throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
+
+  const { TimeLog } = require('../../models');
+  const logs = await TimeLog.find({ task: taskId, deletedAt: null });
+  task.totalTimeSpent = parseFloat(logs.reduce((sum, log) => sum + (log.duration || 0), 0).toFixed(2));
+
   return task;
 };
 
