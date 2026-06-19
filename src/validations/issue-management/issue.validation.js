@@ -30,7 +30,10 @@ const getIssues = {
       'Pending Client',
       'Resolved',
       'Closed',
-      'Reopened'
+      'Reopened',
+      'To Do',
+      'Review',
+      'Done'
     ),
     assignedTo: Joi.string().allow(null, 'null', ''),
     sortBy: Joi.string(),
@@ -65,7 +68,10 @@ const updateIssue = {
         'Pending Client',
         'Resolved',
         'Closed',
-        'Reopened'
+        'Reopened',
+        'To Do',
+        'Review',
+        'Done'
       ),
       assignedTo: Joi.string().allow(null, ''),
       estimatedHours: Joi.number().min(0).allow(null),

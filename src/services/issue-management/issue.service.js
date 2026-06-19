@@ -76,7 +76,7 @@ const createIssue = async (issueBody, userId) => {
     issueId,
     dueDate,
     createdBy: userId,
-    status: issueBody.assignedTo ? 'Assigned' : 'Backlog',
+    status: 'To Do',
   };
 
   const issue = await Issue.create(issueData);
@@ -222,8 +222,8 @@ const updateIssueById = async (issueId, updateBody, updaterUser = null) => {
   }
 
   // Update status changes assigned status automatically
-  if (updateBody.assignedTo && !issue.assignedTo && issue.status === 'Backlog') {
-    updateBody.status = 'Assigned';
+  if (updateBody.assignedTo && !issue.assignedTo && issue.status === 'To Do') {
+    updateBody.status = 'To Do';
   }
 
   const oldAssignee = issue.assignedTo ? String(issue.assignedTo._id || issue.assignedTo) : null;
