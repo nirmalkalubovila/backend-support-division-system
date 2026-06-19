@@ -21,8 +21,8 @@ const createCR = async (body, userId) => {
     ...body,
     crNumber,
     createdBy: userId,
-    status: body.status || 'Submitted',
-    timeline: [{ fromStatus: null, toStatus: body.status || 'Submitted', changedBy: userId, note: 'CR created' }],
+    status: body.status || 'To Do',
+    timeline: [{ fromStatus: null, toStatus: body.status || 'To Do', changedBy: userId, note: 'CR created' }],
   });
 
   // Trigger assignment notifications
@@ -205,8 +205,8 @@ const getCRStats = async (projectId) => {
   const crs = await ChangeRequest.find({ project: projectId, deletedAt: null });
   const stats = {
     total: crs.length,
-    inDevelopment: crs.filter((c) => c.status === 'In Development').length,
-    completed: crs.filter((c) => c.status === 'Completed').length,
+    inDevelopment: crs.filter((c) => c.status === 'In Progress').length,
+    completed: crs.filter((c) => c.status === 'Done').length,
     rejected: crs.filter((c) => c.status === 'Rejected').length,
     totalEstimatedHours: crs.reduce((s, c) => s + (c.estimatedHours || 0), 0),
     totalActualHours: crs.reduce((s, c) => s + (c.actualHours || 0), 0),
