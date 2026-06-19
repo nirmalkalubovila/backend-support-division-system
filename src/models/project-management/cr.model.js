@@ -43,8 +43,8 @@ const crSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Submitted', 'Rejected', 'In Development', 'Testing', 'Completed', 'Closed'],
-      default: 'Submitted',
+      enum: ['To Do', 'Rejected', 'In Progress', 'Review', 'Done', 'Closed'],
+      default: 'To Do',
     },
     requestedBy: { type: String, trim: true, default: null },
     requestedDate: { type: Date, default: Date.now },

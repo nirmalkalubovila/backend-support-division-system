@@ -282,6 +282,22 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuratio
   }
 
   // Auto-transition item status when timer stops
+  // Auto-transition issue to Testing
+  if (activeLog.issue) {
+    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
+  }
+
+  // Auto-transition task to Review
+  if (activeLog.task) {
+    await Task.updateOne({ _id: activeLog.task, status: { $ne: 'Done' } }, { status: 'Review' });
+  }
+
+  // Trigger time limit exceeded check in a non-blocking block
+  Promise.resolve().then(() => {
+    checkAndNotifyTimeExceeded(issueId, activeLog.duration, 0, userId);
+  });
+  // Trigger time limit exceeded check in a non-blocking block (only for issues)
+  // Auto-transition issue to Testing (only when this is an issue log)
   if (activeLog.issue) {
     await Issue.updateOne({ _id: activeLog.issue }, { status: 'Testing' });
     // Trigger time limit exceeded check (only for issues)
