@@ -20,6 +20,7 @@ const createProject = {
     projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
     mainContact: mainContactSchema,
     techStack: Joi.array().items(Joi.string()),
+    stage: Joi.string().valid('development', 'support'),
   }),
 };
 
@@ -59,6 +60,7 @@ const updateProject = {
       projectType: Joi.array().items(Joi.string().valid('New Development', 'CR', 'Support')),
       mainContact: mainContactSchema,
       techStack: Joi.array().items(Joi.string()),
+      stage: Joi.string().valid('development', 'support'),
     })
     .min(1),
 };
