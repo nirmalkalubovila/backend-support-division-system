@@ -113,6 +113,14 @@ const checkBudgetThresholds = async (project) => {
 
   const usageRatio = project.usedHours / project.allocatedHours;
 
+  const fmtHms = (decimalHours) => {
+    const totalSecs = Math.round(decimalHours * 3600);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    return `${h}h ${m}m ${s}s`;
+  };
+
   try {
     const notificationService = require('../system/notification.service');
     const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
@@ -123,7 +131,7 @@ const checkBudgetThresholds = async (project) => {
         await notificationService.createNotification({
           recipient: recipient._id,
           title: 'Budget Exceeded',
-          message: `Project "${project.name}" has exceeded its allocated hour budget. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
+          message: `Project "${project.name}" has exceeded its allocated hour budget. Used: ${fmtHms(project.usedHours)} / Allocated: ${fmtHms(project.allocatedHours)}.`,
           type: 'error',
           module: 'projects',
           relatedId: project._id,
@@ -137,7 +145,7 @@ const checkBudgetThresholds = async (project) => {
         await notificationService.createNotification({
           recipient: recipient._id,
           title: 'Budget Warning (80%)',
-          message: `Project "${project.name}" has consumed ${Math.round(usageRatio * 100)}% of allocated hours. Used: ${project.usedHours.toFixed(1)}h / Allocated: ${project.allocatedHours}h.`,
+          message: `Project "${project.name}" has consumed ${Math.round(usageRatio * 100)}% of allocated hours. Used: ${fmtHms(project.usedHours)} / Allocated: ${fmtHms(project.allocatedHours)}.`,
           type: 'warning',
           module: 'projects',
           relatedId: project._id,
