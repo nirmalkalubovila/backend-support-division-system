@@ -66,10 +66,13 @@ router.patch('/categories',
   settingController.updateCategories
 );
 
-router.get('/notifications', settingController.getNotifications);
-
+router.get('/notifications',
+  auth('system.notification.read'),
+  settingController.getNotifications
+);
+ 
 router.patch('/notifications',
-  auth('system.settings.update'),
+  auth('system.notification.update'),
   validate(settingValidation.updateNotifications),
   activityLogger('Update system notification preferences'),
   settingController.updateNotifications
