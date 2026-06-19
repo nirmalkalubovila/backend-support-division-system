@@ -3,6 +3,44 @@ const mongoose = require('mongoose');
 const { TimeLog, Issue, Project, User, Task, ChangeRequest } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
+const autoStopExceededTimers = async () => {
+  try {
+    const activeLogs = await TimeLog.find({ endTime: null, deletedAt: null }).populate('issue task cr');
+    for (const log of activeLogs) {
+      let estHours = null;
+      if (log.issue && log.issue.estimatedHours) estHours = log.issue.estimatedHours;
+      else if (log.task && log.task.estimatedHours) estHours = log.task.estimatedHours;
+      else if (log.cr && log.cr.estimatedHours) estHours = log.cr.estimatedHours;
+
+      if (estHours && estHours > 0) {
+        const elapsedMs = Date.now() - log.startTime.getTime();
+        const allocatedMs = estHours * 3600 * 1000;
+        if (elapsedMs >= allocatedMs) {
+          const autoEndTime = new Date(log.startTime.getTime() + allocatedMs);
+          log.endTime = autoEndTime;
+          log.duration = parseFloat(estHours.toFixed(2));
+          log.note = log.note ? `${log.note} [Ended automatically]` : '[Ended automatically]';
+          await log.save();
+          
+          if (log.issue) {
+            await Issue.updateOne({ _id: log.issue._id }, { status: 'Review' });
+          } else if (log.task) {
+            await Task.updateOne({ _id: log.task._id, status: { $ne: 'Done' } }, { status: 'Review' });
+          } else if (log.cr) {
+            await ChangeRequest.updateOne({ _id: log.cr._id, status: { $ne: 'Done' } }, { status: 'Review' });
+          }
+          await updateProjectUsedHours(log.project);
+        }
+      }
+    }
+  } catch (error) {
+    const logger = require('../../config/logger');
+    if (logger && logger.error) {
+      logger.error('Error running auto-stop for exceeded timers: ' + error.message);
+    }
+  }
+};
+
 /**
  * Recalculate project total used hours based on approved time logs
  * @param {string} projectId
@@ -89,6 +127,7 @@ const checkAndNotifyTimeExceeded = async (issueId, sessionDuration = 0, previous
  * Start active stopwatch timer for a user on an issue, task, or CR
  */
 const startTimer = async (userId, issueId, taskId, crId, workType, note = '', isBillable = true) => {
+  await autoStopExceededTimers();
   let project = null;
 
   if (issueId) {
@@ -180,6 +219,7 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
  * Stop active stopwatch timer for a user
  */
 const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
+  await autoStopExceededTimers();
   const query = { user: userId, endTime: null, deletedAt: null };
   if (issueId) query.issue = issueId;
   else if (taskId) query.task = taskId;
@@ -426,6 +466,7 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
  * Paginate and query time logs
  */
 const queryTimeLogs = async (filter, options) => {
+  await autoStopExceededTimers();
   const queryFilter = { ...filter, deletedAt: null };
   const logs = await TimeLog.paginate(queryFilter, {
     ...options,

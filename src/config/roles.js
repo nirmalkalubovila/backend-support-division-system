@@ -15,6 +15,9 @@ roleRights.set('intern', [
   'time_tracking.time_log.create',
   'time_tracking.time_log.read',
   'reports.user_performance.read',
+  'system.settings.read',
+  'system.notification.read',
+  'system.notification.update',
 ]);
 
 // Engineer — frontline resolution
