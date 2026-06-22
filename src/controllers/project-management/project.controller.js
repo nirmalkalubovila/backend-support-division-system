@@ -20,6 +20,10 @@ const createProject = catchAsync(async (req, res) => {
   if (typeof body.mainContact === 'string') {
     try { body.mainContact = JSON.parse(body.mainContact); } catch { body.mainContact = {}; }
   }
+  // Support new mainContacts array field
+  if (typeof body.mainContacts === 'string') {
+    try { body.mainContacts = JSON.parse(body.mainContacts); } catch { body.mainContacts = []; }
+  }
   if (body.completion !== undefined) body.completion = Number(body.completion);
 
   if (req.file) {
@@ -65,6 +69,10 @@ const updateProject = catchAsync(async (req, res) => {
   }
   if (typeof body.mainContact === 'string') {
     try { body.mainContact = JSON.parse(body.mainContact); } catch { body.mainContact = {}; }
+  }
+  // Support new mainContacts array field
+  if (typeof body.mainContacts === 'string') {
+    try { body.mainContacts = JSON.parse(body.mainContacts); } catch { body.mainContacts = []; }
   }
   if (body.completion !== undefined) body.completion = Number(body.completion);
   if (typeof body.isActive === 'string') body.isActive = body.isActive === 'true';
