@@ -62,11 +62,13 @@ const projectSchema = new mongoose.Schema(
       enum: ['New Development', 'CR', 'Support'],
       default: [],
     },
-    mainContact: {
-      name: { type: String, default: null },
-      email: { type: String, default: null },
-      phone: { type: String, default: null },
-    },
+    mainContacts: [
+      {
+        name: { type: String, default: null },
+        email: { type: String, default: null },
+        phone: { type: String, default: null },
+      },
+    ],
     techStack: {
       type: [String],
       default: [],
