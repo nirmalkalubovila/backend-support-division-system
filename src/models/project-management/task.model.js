@@ -52,6 +52,7 @@ const taskSchema = new mongoose.Schema(
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     assignees: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    dependencies: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: [] }],
     relatedLinks: [{ label: String, url: String }],
     attachments: [taskAttachmentSchema],
     order: { type: Number, default: 0 },

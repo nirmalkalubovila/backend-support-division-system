@@ -3,6 +3,82 @@ const path = require('path');
 const { Task, Project } = require('../../models');
 const ApiError = require('../../utils/ApiError');
 
+const checkCircular = async (taskId, dependenciesToCheck) => {
+  const visited = new Set();
+  const queue = [...dependenciesToCheck];
+  while (queue.length > 0) {
+    const currentId = queue.shift();
+    if (String(currentId) === String(taskId)) {
+      return true;
+    }
+    if (visited.has(currentId.toString())) continue;
+    visited.add(currentId.toString());
+
+    const currentTask = await Task.findOne({ _id: currentId, deletedAt: null }).select('dependencies');
+    if (currentTask && currentTask.dependencies) {
+      queue.push(...currentTask.dependencies);
+    }
+  }
+  return false;
+};
+
+const validateTaskSchedulingAndDependencies = async (taskId, updatedData, existingTask = null) => {
+  const taskName = updatedData.name || (existingTask ? existingTask.name : 'Task');
+  
+  const getVal = (field) => {
+    if (updatedData[field] !== undefined) {
+      return updatedData[field] ? new Date(updatedData[field]) : null;
+    }
+    return existingTask && existingTask[field] ? new Date(existingTask[field]) : null;
+  };
+
+  const startDate = getVal('startDate');
+  const endDate = getVal('endDate');
+
+  if (startDate && endDate && startDate > endDate) {
+    throw new ApiError(httpStatus.BAD_REQUEST, `Start date cannot be after end date for task "${taskName}".`);
+  }
+
+  const dependencies = updatedData.dependencies !== undefined ? updatedData.dependencies : (existingTask ? existingTask.dependencies : []);
+
+  if (taskId && dependencies && dependencies.length > 0) {
+    const hasCycle = await checkCircular(taskId, dependencies);
+    if (hasCycle) {
+      throw new ApiError(httpStatus.BAD_REQUEST, `Circular dependency detected. A task cannot depend on itself or on tasks that depend on it.`);
+    }
+  }
+
+  if (startDate && dependencies && dependencies.length > 0) {
+    for (const depId of dependencies) {
+      if (taskId && String(depId) === String(taskId)) {
+        throw new ApiError(httpStatus.BAD_REQUEST, `A task cannot depend on itself.`);
+      }
+      const predecessor = await Task.findOne({ _id: depId, deletedAt: null });
+      if (!predecessor) {
+        throw new ApiError(httpStatus.NOT_FOUND, `Predecessor task not found.`);
+      }
+      if (predecessor.endDate && startDate < predecessor.endDate) {
+        throw new ApiError(
+          httpStatus.BAD_REQUEST,
+          `Invalid schedule: Task "${taskName}" starts on ${startDate.toLocaleDateString()} which is before predecessor task "${predecessor.name}" ends on ${predecessor.endDate.toLocaleDateString()}.`
+        );
+      }
+    }
+  }
+
+  if (taskId && endDate) {
+    const successors = await Task.find({ dependencies: taskId, deletedAt: null });
+    for (const successor of successors) {
+      if (successor.startDate && endDate > successor.startDate) {
+        throw new ApiError(
+          httpStatus.BAD_REQUEST,
+          `Invalid schedule: Task "${taskName}" ends on ${endDate.toLocaleDateString()} which is after successor task "${successor.name}" starts on ${successor.startDate.toLocaleDateString()}.`
+        );
+      }
+    }
+  }
+};
+
 // Recalculate and persist CR implementation progress after any task change
 const recalcCRProgress = async (crId) => {
   if (!crId) return;
@@ -26,6 +102,7 @@ const createTask = async (taskBody) => {
     const parent = await Task.findOne({ _id: taskBody.parent, deletedAt: null });
     if (!parent) throw new ApiError(httpStatus.NOT_FOUND, 'Parent task not found');
   }
+  await validateTaskSchedulingAndDependencies(null, taskBody);
   const task = await Task.create(taskBody);
 
   // D2: If this is a sub-task, notify the parent task assignees
@@ -85,6 +162,7 @@ const getProjectTasks = async (projectId) => {
     .populate('assignees', 'name email role avatar')
     .populate('parent', 'name')
     .populate('cr', 'crNumber title _id')
+    .populate('dependencies', 'name startDate endDate status')
     .sort({ order: 1, createdAt: 1 });
 
   const { TimeLog } = require('../../models');
@@ -110,7 +188,8 @@ const getTaskById = async (taskId) => {
   const task = await Task.findOne({ _id: taskId, deletedAt: null })
     .populate('assignees', 'name email role avatar')
     .populate('parent', 'name')
-    .populate('cr', 'crNumber title _id');
+    .populate('cr', 'crNumber title _id')
+    .populate('dependencies', 'name startDate endDate status');
   if (!task) throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
 
   const { TimeLog } = require('../../models');
@@ -125,10 +204,13 @@ const updateTaskById = async (taskId, updateBody) => {
   const oldStatus = task.status;
   const oldAssignees = task.assignees.map((id) => id.toString());
 
+  await validateTaskSchedulingAndDependencies(taskId, updateBody, task);
+
   Object.assign(task, updateBody);
   await task.save();
   await task.populate('assignees', 'name email role avatar');
   await task.populate('cr', 'crNumber title _id');
+  await task.populate('dependencies', 'name startDate endDate status');
 
   const newStatus = task.status;
   const statusChanged = oldStatus !== newStatus;
