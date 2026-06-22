@@ -44,4 +44,19 @@ router
     paymentController.deletePayment
   );
 
+router.post(
+  '/:paymentId/allocate',
+  auth('finance.payment.update'),
+  validate(paymentValidation.allocatePayment),
+  activityLogger('Allocate payment'),
+  paymentController.allocatePayment
+);
+
+router.get(
+  '/:paymentId/transactions',
+  auth('finance.payment.read'),
+  validate(paymentValidation.getPayment),
+  paymentController.getPaymentTransactions
+);
+
 module.exports = { router, globalRouter };
