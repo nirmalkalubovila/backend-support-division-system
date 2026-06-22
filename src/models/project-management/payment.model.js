@@ -2,6 +2,36 @@ const mongoose = require('mongoose');
 const toJSON = require('../plugins/toJSON.plugin');
 const paginate = require('../plugins/paginate.plugin');
 
+// Sub-schema for individual payment allocation transactions
+const paymentTransactionSchema = new mongoose.Schema(
+  {
+    amount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    paymentDate: {
+      type: Date,
+      default: null,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['Bank Transfer', 'Cash', 'Online Payment', null],
+      default: null,
+    },
+    referenceNumber: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    notes: {
+      type: String,
+      default: null,
+    },
+  },
+  { timestamps: true }
+);
+
 const paymentSchema = new mongoose.Schema(
   {
     project: {
@@ -20,8 +50,12 @@ const paymentSchema = new mongoose.Schema(
     },
     uom: {
       type: String,
-      enum: ['Hour', 'Task', 'Milestone', 'Month', 'Custom'],
       default: null,
+    },
+    month: {
+      type: String,
+      default: null,
+      trim: true,
     },
     quantity: {
       type: Number,
@@ -69,6 +103,10 @@ const paymentSchema = new mongoose.Schema(
     notes: {
       type: String,
       default: null,
+    },
+    transactions: {
+      type: [paymentTransactionSchema],
+      default: [],
     },
     deletedAt: {
       type: Date,
