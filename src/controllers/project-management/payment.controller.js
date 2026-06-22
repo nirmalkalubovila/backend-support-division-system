@@ -39,6 +39,18 @@ const deletePayment = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
+const allocatePayment = catchAsync(async (req, res) => {
+  const body = { ...req.body };
+  if (body.amount !== undefined) body.amount = Number(body.amount);
+  const payment = await paymentService.allocatePayment(req.params.paymentId, body);
+  res.send(payment);
+});
+
+const getPaymentTransactions = catchAsync(async (req, res) => {
+  const result = await paymentService.getPaymentTransactions(req.params.paymentId);
+  res.send(result);
+});
+
 const getProjectFinanceSummary = catchAsync(async (req, res) => {
   const summary = await paymentService.getProjectFinanceSummary(req.params.projectId);
   res.send(summary);
@@ -61,6 +73,8 @@ module.exports = {
   getPayment,
   updatePayment,
   deletePayment,
+  allocatePayment,
+  getPaymentTransactions,
   getProjectFinanceSummary,
   getGlobalFinanceKPIs,
   getAllProjectsFinance,
