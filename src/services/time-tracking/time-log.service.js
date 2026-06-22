@@ -181,6 +181,18 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     finalNote = note ? `${note} [Reopened issue fixing]` : 'Reopened issue fixing';
   }
 
+  // Prevent duplicate active log for the same item (idempotent start)
+  const existingActiveLog = await TimeLog.findOne({
+    user: userId,
+    endTime: null,
+    deletedAt: null,
+    ...(issueId ? { issue: issueId } : taskId ? { task: taskId } : { cr: crId }),
+  });
+  if (existingActiveLog) {
+    // Timer already running for this item — return existing log
+    return existingActiveLog;
+  }
+
   const timeLog = await TimeLog.create({
     issue: issueId || null,
     task: taskId || null,
@@ -487,6 +499,9 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
       checkAndNotifyTimeExceeded(issueId, timeLog.duration, 0, userId);
     });
   }
+
+  // Update project used hours
+  await updateProjectUsedHours(project);
 
   // E1: Notify project managers that a manual time log has been submitted
   Promise.resolve().then(async () => {

@@ -220,6 +220,14 @@ const checkBudgetThresholds = async (project) => {
 
   const usageRatio = usedHours / project.allocatedHours;
 
+  const fmtHms = (decimalHours) => {
+    const totalSecs = Math.round(decimalHours * 3600);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    return `${h}h ${m}m ${s}s`;
+  };
+
   try {
     const notificationService = require('../system/notification.service');
     const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });

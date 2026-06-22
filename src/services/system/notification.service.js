@@ -25,7 +25,7 @@ const createNotification = async (notificationBody) => {
   let moduleInAppEnabled = true;
   let moduleEmailEnabled = true;
 
-  if (module && recipientUser.role && ['super_admin', 'admin', 'manager'].includes(recipientUser.role)) {
+  if (module && recipientUser.role) {
     try {
       const settingService = require('./setting.service');
       const notifPrefs = await settingService.getNotifications();
