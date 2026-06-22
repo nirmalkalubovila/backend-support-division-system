@@ -48,10 +48,34 @@ const getProjects = catchAsync(async (req, res) => {
   }
 
   // Visibility: super_admin and manager can see all projects.
-  // All other roles can only see projects they are assigned to.
+  // All other roles can only see projects they are assigned to (via members, issues, tasks, or CRs).
   const privilegedRoles = ['super_admin', 'manager'];
   if (!privilegedRoles.includes(req.user.role)) {
-    filter.members = req.user._id;
+    const { Issue, Task, ChangeRequest } = require('../../models');
+    const [issueProjects, taskProjects, crProjects] = await Promise.all([
+      Issue.find({ assignedTo: req.user._id, deletedAt: null }).distinct('project'),
+      Task.find({ assignees: req.user._id, deletedAt: null }).distinct('project'),
+      ChangeRequest.find({
+        $or: [
+          { assignedDevelopers: req.user._id },
+          { assignedProjectManager: req.user._id }
+        ],
+        deletedAt: null
+      }).distinct('project'),
+    ]);
+
+    const assignedProjectIds = [
+      ...new Set([
+        ...issueProjects.map(String),
+        ...taskProjects.map(String),
+        ...crProjects.map(String),
+      ])
+    ];
+
+    filter.$or = [
+      { members: req.user._id },
+      { _id: { $in: assignedProjectIds } }
+    ];
   }
 
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
@@ -68,7 +92,23 @@ const getProject = catchAsync(async (req, res) => {
     const userId = String(req.user._id);
     const isMember = project.members.some((m) => String(m._id ?? m) === userId);
     if (!isMember) {
-      throw new ApiError(httpStatus.FORBIDDEN, 'You do not have access to this project');
+      const { Issue, Task, ChangeRequest } = require('../../models');
+      const [hasIssue, hasTask, hasCr] = await Promise.all([
+        Issue.exists({ project: project._id, assignedTo: req.user._id, deletedAt: null }),
+        Task.exists({ project: project._id, assignees: req.user._id, deletedAt: null }),
+        ChangeRequest.exists({
+          project: project._id,
+          $or: [
+            { assignedDevelopers: req.user._id },
+            { assignedProjectManager: req.user._id }
+          ],
+          deletedAt: null
+        }),
+      ]);
+
+      if (!hasIssue && !hasTask && !hasCr) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'You do not have access to this project');
+      }
     }
   }
 

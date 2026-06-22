@@ -36,6 +36,17 @@ const verifyCallback = (req, resolve, reject, requiredRight) => async (err, user
       } catch (err) {}
     }
 
+    // Custom check: Allow user to delete their own time log
+    if (!hasRight && requiredRight === 'time_tracking.time_log.delete' && req.params.logId) {
+      try {
+        const { TimeLog } = require('../models');
+        const log = await TimeLog.findOne({ _id: req.params.logId, deletedAt: null });
+        if (log && log.user && log.user.toString() === user.id.toString()) {
+          hasRight = true;
+        }
+      } catch (err) {}
+    }
+
     if (!hasRight && user.role !== 'super_admin') {
       return reject(new ApiError(httpStatus.FORBIDDEN, 'Forbidden — insufficient permissions'));
     }

@@ -135,8 +135,8 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     if (!issue) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Issue not found');
     }
-    if (issue.status === 'To Do' || issue.status === 'Closed' || issue.status === 'Done') {
-      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for To Do, Done or Closed issues');
+    if (issue.status === 'Closed' || issue.status === 'Done') {
+      throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Done or Closed issues');
     }
     project = issue.project;
   } else if (taskId) {
@@ -184,6 +184,52 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
   if (existingActiveLog) {
     // Timer already running for this item — return existing log
     return existingActiveLog;
+  }
+
+  // Auto-stop any existing active timers for this user
+  const otherActiveLogs = await TimeLog.find({
+    user: userId,
+    endTime: null,
+    deletedAt: null,
+  });
+
+  for (const log of otherActiveLogs) {
+    if (
+      (issueId && String(log.issue) === String(issueId)) ||
+      (taskId && String(log.task) === String(taskId)) ||
+      (crId && String(log.cr) === String(crId))
+    ) {
+      continue;
+    }
+
+    const end = new Date();
+    const diffMs = end - log.startTime;
+    const diffMins = diffMs / (1000 * 60);
+
+    if (diffMins < 5) {
+      await log.deleteOne();
+    } else {
+      let duration = diffMins / 60;
+      let noteText = log.note;
+      if (duration > 12) {
+        duration = 12;
+        noteText = noteText ? `${noteText} [FLAGGED: Session exceeded 12 hours]` : '[FLAGGED: Session exceeded 12 hours]';
+      }
+      log.endTime = end;
+      log.duration = parseFloat(duration.toFixed(2));
+      log.note = noteText ? `${noteText} [Auto-stopped]` : '[Auto-stopped]';
+      await log.save();
+      await updateProjectUsedHours(log.project);
+
+      // Auto-transition stopped items to Review
+      if (log.issue) {
+        await Issue.updateOne({ _id: log.issue }, { status: 'Review' });
+      } else if (log.task) {
+        await Task.updateOne({ _id: log.task, status: { $ne: 'Done' } }, { status: 'Review' });
+      } else if (log.cr) {
+        await ChangeRequest.updateOne({ _id: log.cr, status: { $ne: 'Done' } }, { status: 'Review' });
+      }
+    }
   }
 
   const timeLog = await TimeLog.create({
