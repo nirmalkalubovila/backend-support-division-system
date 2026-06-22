@@ -1,6 +1,7 @@
 const httpStatus = require('http-status');
 const path = require('path');
 const catchAsync = require('../../utils/catchAsync');
+const ApiError = require('../../utils/ApiError');
 const { projectService } = require('../../services');
 const pick = require('../../utils/pick');
 
@@ -45,6 +46,14 @@ const getProjects = catchAsync(async (req, res) => {
   if (req.query.isActive !== undefined) {
     filter.isActive = req.query.isActive;
   }
+
+  // Visibility: super_admin and manager can see all projects.
+  // All other roles can only see projects they are assigned to.
+  const privilegedRoles = ['super_admin', 'manager'];
+  if (!privilegedRoles.includes(req.user.role)) {
+    filter.members = req.user._id;
+  }
+
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await projectService.queryProjects(filter, options);
   res.send(result);
@@ -52,6 +61,17 @@ const getProjects = catchAsync(async (req, res) => {
 
 const getProject = catchAsync(async (req, res) => {
   const project = await projectService.getProjectById(req.params.projectId);
+
+  // Enforce visibility: non-privileged users may only access projects they are assigned to.
+  const privilegedRoles = ['super_admin', 'manager'];
+  if (!privilegedRoles.includes(req.user.role)) {
+    const userId = String(req.user._id);
+    const isMember = project.members.some((m) => String(m._id ?? m) === userId);
+    if (!isMember) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'You do not have access to this project');
+    }
+  }
+
   res.send(project);
 });
 
