@@ -14,6 +14,7 @@ const createTask = {
     parent: Joi.string().allow(null),
     order: Joi.number().default(0),
     cr: Joi.string().allow(null),
+    dependencies: Joi.array().items(Joi.string()).default([]),
   }),
 };
 
@@ -39,6 +40,7 @@ const updateTask = {
     parent: Joi.string().allow(null),
     order: Joi.number(),
     cr: Joi.string().allow(null),
+    dependencies: Joi.array().items(Joi.string()),
   }).min(1),
 };
 
