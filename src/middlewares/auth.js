@@ -12,7 +12,30 @@ const verifyCallback = (req, resolve, reject, requiredRight) => async (err, user
   if (requiredRight) {
     const userRights = roleRights.get(user.role) || [];
     // Check role-based rights first, then user-specific permissions
-    const hasRight = userRights.includes(requiredRight) || (user.permissions && user.permissions.includes(requiredRight));
+    let hasRight = userRights.includes(requiredRight) || (user.permissions && user.permissions.includes(requiredRight));
+    
+    // Custom check: Allow assigned developer to update CR
+    if (!hasRight && requiredRight === 'projects.cr.update' && req.params.crId) {
+      try {
+        const { ChangeRequest } = require('../models');
+        const cr = await ChangeRequest.findOne({ _id: req.params.crId, deletedAt: null });
+        if (cr && cr.assignedDevelopers && cr.assignedDevelopers.some(id => id.toString() === user.id.toString())) {
+          hasRight = true;
+        }
+      } catch (err) {}
+    }
+
+    // Custom check: Allow assigned task user to update Task
+    if (!hasRight && requiredRight === 'projects.task.update' && req.params.taskId) {
+      try {
+        const { Task } = require('../models');
+        const task = await Task.findOne({ _id: req.params.taskId, deletedAt: null });
+        if (task && task.assignees && task.assignees.some(id => id.toString() === user.id.toString())) {
+          hasRight = true;
+        }
+      } catch (err) {}
+    }
+
     if (!hasRight && user.role !== 'super_admin') {
       return reject(new ApiError(httpStatus.FORBIDDEN, 'Forbidden — insufficient permissions'));
     }

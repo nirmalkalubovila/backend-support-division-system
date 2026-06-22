@@ -14,7 +14,7 @@ const TRANSITIONS = {
 
 // Only these two transitions have role restrictions — everything else is open.
 const ROLE_GATES = {
-  'Review->Done':      ['super_admin', 'manager', 'senior_engineer'],
+  'Review->Done':      ['super_admin', 'manager', 'senior_engineer', 'engineer'],
   'Done->In Progress': ['super_admin', 'manager', 'senior_engineer'],
 };
 
