@@ -63,7 +63,7 @@ const getPaymentById = async (id) => {
   return payment;
 };
 
-const updatePaymentById = async (id, updateBody) => {
+const updatePaymentById = async (id, updateBody, userId = null) => {
   const payment = await getPaymentById(id);
   const prevStatus = payment.paymentStatus;
 
@@ -99,6 +99,35 @@ const updatePaymentById = async (id, updateBody) => {
     }
   }
 
+  // Trigger notifications
+  if (newStatus === 'Paid' && prevStatus !== 'Paid') {
+    try {
+      const { User } = require('../../models');
+      const notificationService = require('../system/notification.service');
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+
+      const formattedTotal = Number(payment.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      for (const recipient of adminsAndManagers) {
+        if (userId && String(recipient._id) === String(userId)) continue;
+        
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: 'Payment Fully Settled',
+          message: `Payment ${payment.paymentId} (LKR ${formattedTotal}) is now fully Paid.`,
+          type: 'success',
+          module: 'finance',
+          relatedId: payment._id,
+          relatedLink: `/finance/${payment.project._id || payment.project}?tab=payments`,
+        });
+      }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to trigger payment fully settled notification', { error: err.message });
+    }
+  }
+
   return Payment.findById(id).populate('project');
 };
 
@@ -108,7 +137,7 @@ const updatePaymentById = async (id, updateBody) => {
  * Derives partiallyPaidAmount from the sum of all transactions.
  * Auto-transitions status to Paid or Partially Paid.
  */
-const allocatePayment = async (id, { amount, paymentMethod, paymentDate, referenceNumber, notes }) => {
+const allocatePayment = async (id, { amount, paymentMethod, paymentDate, referenceNumber, notes }, userId = null) => {
   const payment = await getPaymentById(id);
 
   if (!['Pending', 'Partially Paid'].includes(payment.paymentStatus)) {
@@ -158,6 +187,51 @@ const allocatePayment = async (id, { amount, paymentMethod, paymentDate, referen
     },
     { new: true }
   ).populate('project');
+
+  // Trigger notifications
+  try {
+    const { User } = require('../../models');
+    const notificationService = require('../system/notification.service');
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+
+    const formattedAmount = Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formattedTotal = Number(updated.totalAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const projectId = updated.project._id || updated.project;
+
+    for (const recipient of adminsAndManagers) {
+      if (userId && String(recipient._id) === String(userId)) continue;
+      
+      // FIN-05: Payment Allocated
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'Payment Allocated',
+        message: `A payment amount of LKR ${formattedAmount} was received and allocated against Payment ${updated.paymentId}.`,
+        type: 'info',
+        module: 'finance',
+        relatedId: updated._id,
+        relatedLink: `/finance/${projectId}?tab=payments`,
+      });
+
+      // FIN-06: Payment Fully Settled
+      if (newStatus === 'Paid') {
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: 'Payment Fully Settled',
+          message: `Payment ${updated.paymentId} (LKR ${formattedTotal}) is now fully Paid.`,
+          type: 'success',
+          module: 'finance',
+          relatedId: updated._id,
+          relatedLink: `/finance/${projectId}?tab=payments`,
+        });
+      }
+    }
+  } catch (err) {
+    const logger = require('../../config/logger');
+    logger.error('Failed to trigger payment allocation notifications', { error: err.message });
+  }
 
   return updated;
 };

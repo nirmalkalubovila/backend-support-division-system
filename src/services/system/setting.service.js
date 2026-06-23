@@ -126,6 +126,7 @@ const DEFAULT_MODULE_PREFERENCES = {
   tasks: { email: true, inApp: true },
   'time-tracking': { email: true, inApp: true },
   system: { email: true, inApp: true },
+  finance: { email: true, inApp: true },
 };
 
 /**
