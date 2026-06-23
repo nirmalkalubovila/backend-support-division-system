@@ -15,6 +15,8 @@ const Branding = require('./system/branding.model');
 const TimeLog = require('./time-tracking/time-log.model');
 const Notification = require('./system/notification.model');
 const Payment = require('./project-management/payment.model');
+const UomBaseline = require('./project-management/uom-baseline.model');
+const UomSnapshot = require('./project-management/uom-snapshot.model');
 
 module.exports = {
   User,
@@ -35,4 +37,6 @@ module.exports = {
   ChangeRequest,
   Notification,
   Payment,
+  UomBaseline,
+  UomSnapshot,
 };

@@ -58,5 +58,13 @@
   "finance.payment.create",
   "finance.payment.read",
   "finance.payment.update",
-  "finance.payment.delete"
+  "finance.payment.delete",
+  "finance.uom.read",
+  "finance.uom.configure",
+  "finance.uom.snapshot.create",
+  "finance.uom.snapshot.update",
+  "finance.uom.snapshot.finalize",
+  "finance.uom.snapshot.unlock",
+  "finance.uom.snapshot.override",
+  "finance.uom.snapshot.delete"
 ]

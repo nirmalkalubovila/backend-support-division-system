@@ -45,7 +45,7 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentType: {
       type: String,
-      enum: ['Advance', 'UOM Based'],
+      enum: ['Advance', 'Project Fixed Price', 'CR Based', 'UOM Based', 'Other'],
       required: true,
     },
     uom: {
@@ -108,6 +108,17 @@ const paymentSchema = new mongoose.Schema(
       type: [paymentTransactionSchema],
       default: [],
     },
+    // Reference to the UOM snapshot that generated this payment (system-generated only)
+    uomSnapshot: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'UomSnapshot',
+      default: null,
+    },
+    // True for payments auto-created when a UOM snapshot is finalised
+    isSystemGenerated: {
+      type: Boolean,
+      default: false,
+    },
     deletedAt: {
       type: Date,
       default: null,
@@ -118,7 +129,10 @@ const paymentSchema = new mongoose.Schema(
 
 // Auto-calculate totalAmount and generate paymentId
 paymentSchema.pre('save', async function (next) {
-  if (this.paymentType === 'UOM Based' && this.quantity != null) {
+  // System-generated UOM payments store the snapshot grandTotal in pricePerUnit directly
+  if (this.isSystemGenerated) {
+    this.totalAmount = parseFloat(this.pricePerUnit.toFixed(2));
+  } else if (this.paymentType === 'UOM Based' && this.quantity != null) {
     this.totalAmount = parseFloat((this.quantity * this.pricePerUnit).toFixed(2));
   } else {
     this.totalAmount = parseFloat(this.pricePerUnit.toFixed(2));
