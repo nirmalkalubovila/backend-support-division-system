@@ -4,7 +4,6 @@ const catchAsync = require('../../utils/catchAsync');
 const ApiError = require('../../utils/ApiError');
 const { projectService } = require('../../services');
 const pick = require('../../utils/pick');
-const ApiError = require('../../utils/ApiError');
 
 const createProject = catchAsync(async (req, res) => {
   const body = { ...req.body };
