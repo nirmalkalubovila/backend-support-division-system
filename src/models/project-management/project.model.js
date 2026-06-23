@@ -59,7 +59,7 @@ const projectSchema = new mongoose.Schema(
     },
     projectType: {
       type: [String],
-      enum: ['New Development', 'CR', 'Support'],
+      enum: ['Development', 'Support'],
       default: [],
     },
     mainContacts: [

@@ -2,6 +2,8 @@ const httpStatus = require('http-status');
 const mongoose = require('mongoose');
 const { TimeLog, Issue, Project, User, Task, ChangeRequest } = require('../../models');
 const ApiError = require('../../utils/ApiError');
+const { getIO } = require('../../config/socket');
+const logger = require('../../config/logger');
 
 const autoStopExceededTimers = async () => {
   try {
@@ -43,7 +45,7 @@ const autoStopExceededTimers = async () => {
 };
 
 /**
- * Recalculate project total used hours based on approved time logs
+ * Recalculate project total used hours based on all active (non-deleted) time logs
  * @param {string} projectId
  * @returns {Promise<void>}
  */
@@ -52,7 +54,6 @@ const updateProjectUsedHours = async (projectId) => {
     {
       $match: {
         project: new mongoose.Types.ObjectId(projectId),
-        endTime: { $ne: null },
         deletedAt: null,
       },
     },
@@ -218,6 +219,8 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
   await autoStopExceededTimers();
   let project = null;
 
+  let isReopened = false;
+
   if (issueId) {
     const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
     if (!issue) {
@@ -227,39 +230,43 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
       throw new ApiError(httpStatus.BAD_REQUEST, 'Time logs cannot be created for Done or Closed issues');
     }
     project = issue.project;
+    isReopened = !!issue.isReopened;
   } else if (taskId) {
     const task = await Task.findOne({ _id: taskId, deletedAt: null });
     if (!task) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
     }
     project = task.project;
+    isReopened = !!task.isReopened;
   } else if (crId) {
     const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
     if (!cr) {
       throw new ApiError(httpStatus.NOT_FOUND, 'Change Request not found');
     }
     project = cr.project;
+    isReopened = !!cr.isReopened;
   } else {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Either issueId, taskId, or crId must be provided');
   }
 
-  // Support stage: enforce monthly allocation hours
-  const projectDoc = await Project.findById(project);
-  if (projectDoc && projectDoc.stage === 'support' && projectDoc.allocatedHours > 0) {
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const monthlyAgg = await TimeLog.aggregate([
-      { $match: { project: projectDoc._id, deletedAt: null, startTime: { $gte: monthStart, $lt: monthEnd } } },
-      { $group: { _id: null, total: { $sum: '$duration' } } },
-    ]);
-    const monthlyUsed = monthlyAgg.length > 0 ? monthlyAgg[0].total : 0;
-    if (monthlyUsed >= projectDoc.allocatedHours) {
-      throw new ApiError(
-        httpStatus.FORBIDDEN,
-        `Monthly allocation of ${projectDoc.allocatedHours}h for this support project has been reached (${monthlyUsed.toFixed(2)}h used). No more time can be logged this month.`
-      );
-    }
+  // Clean up any existing active timers for the exact same item to avoid duplicates
+  const existingQuery = { user: userId, endTime: null, deletedAt: null };
+  if (issueId) existingQuery.issue = issueId;
+  else if (taskId) existingQuery.task = taskId;
+  else if (crId) existingQuery.cr = crId;
+
+  const existingLogs = await TimeLog.find(existingQuery);
+  if (existingLogs.length > 0) {
+    const duplicateIds = existingLogs.map(log => log._id);
+    await TimeLog.deleteMany({ _id: { $in: duplicateIds } });
+    logger.info(`Cleaned up ${duplicateIds.length} existing active log(s) for the same item before starting a new one`);
+  }
+
+  let finalWorkType = workType;
+  let finalNote = note;
+  if (isReopened) {
+    finalWorkType = 'Reopened';
+    finalNote = note ? `${note} [Reopened issue fixing]` : 'Reopened issue fixing';
   }
 
   // Prevent duplicate active log for the same item (idempotent start)
@@ -329,31 +336,41 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     user: userId,
     project,
     startTime: new Date(),
-    workType,
-    note,
+    workType: finalWorkType,
+    note: finalNote,
     isBillable,
     approved: false, // Must be approved by manager later
   });
 
   // Auto-transitions
+  let statusToSet = finalWorkType;
+  if (finalWorkType === 'Reopened') {
+    statusToSet = 'In Progress';
+  }
+
   if (issueId) {
-    const issue = await Issue.findOne({ _id: issueId, deletedAt: null });
-    if (issue && issue.status !== 'In Progress') {
-      issue.status = 'In Progress';
-      await issue.save();
-    }
+    await Issue.updateOne({ _id: issueId }, { status: statusToSet });
   } else if (taskId) {
-    const task = await Task.findOne({ _id: taskId, deletedAt: null });
-    if (task && task.status !== 'In Progress') {
-      task.status = 'In Progress';
-      await task.save();
-    }
+    await Task.updateOne({ _id: taskId }, { status: statusToSet });
   } else if (crId) {
-    const cr = await ChangeRequest.findOne({ _id: crId, deletedAt: null });
-    if (cr && cr.status !== 'In Development') {
-      cr.status = 'In Development';
-      await cr.save();
+    await ChangeRequest.updateOne({ _id: crId }, { status: statusToSet });
+  }
+
+  // Emit WebSocket event
+  try {
+    const io = getIO();
+    if (io) {
+      const itemId = issueId || taskId || crId;
+      io.to(`user:${userId}`).emit('timer:started', {
+        itemId: String(itemId),
+        workType,
+        startTime: timeLog.startTime,
+        timeLog: timeLog.toJSON ? timeLog.toJSON() : timeLog,
+      });
+      logger.info(`WebSocket timer:started emitted to user:${userId} for item ${itemId}`);
     }
+  } catch (error) {
+    logger.error('Failed to emit timer:started via WebSocket', { error: error.message });
   }
 
   return timeLog;
@@ -362,36 +379,50 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
 /**
  * Stop active stopwatch timer for a user
  */
-const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
-  await autoStopExceededTimers();
+const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuration = null) => {
+  const query = { user: userId, endTime: null, deletedAt: null };
+  if (issueId) query.issue = issueId;
+  else if (taskId) query.task = taskId;
+  else if (crId) query.cr = crId;
 
-  // Build item-scoped query
-  const itemQuery = { user: userId, deletedAt: null };
-  if (issueId) itemQuery.issue = issueId;
-  else if (taskId) itemQuery.task = taskId;
-  else if (crId) itemQuery.cr = crId;
+  const activeLogs = await TimeLog.find(query);
+  if (activeLogs.length === 0) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running for this item and user');
+  }
 
-  // 1. Try to find an active log for the specific item
-  let activeLog = await TimeLog.findOne({ ...itemQuery, endTime: null });
-
-  // 2. If no active log for this item, it was likely auto-stopped when the user
-  //    started a timer on another item simultaneously. Return the most recently
-  //    completed log for this item so the frontend can clear its state cleanly.
-  if (!activeLog) {
-    const completedLog = await TimeLog.findOne({ ...itemQuery, endTime: { $ne: null } })
-      .sort({ endTime: -1 });
-    if (completedLog) {
-      // Already saved — return it as-is so the frontend knows the session ended
-      return completedLog;
-    }
-    throw new ApiError(httpStatus.NOT_FOUND, 'No active timer running');
+  // Use the first active log to store the time, and clean up the rest to resolve duplicate/orphaned active logs
+  const activeLog = activeLogs[0];
+  if (activeLogs.length > 1) {
+    const duplicateIds = activeLogs.slice(1).map(log => log._id);
+    await TimeLog.deleteMany({ _id: { $in: duplicateIds } });
+    logger.info(`Cleaned up ${duplicateIds.length} duplicate active logs for user ${userId} on item ${issueId || taskId || crId}`);
   }
 
   const endTime = new Date();
-  const diffMs = endTime - activeLog.startTime;
-  const diffMins = diffMs / (1000 * 60);
+  let diffMins;
+
+  if (activeDuration !== null && activeDuration !== undefined && activeDuration !== '') {
+    diffMins = Number(activeDuration) / 60;
+  } else {
+    const diffMs = endTime - activeLog.startTime;
+    diffMins = diffMs / (1000 * 60);
+  }
 
   if (diffMins < 5) {
+    const itemId = activeLog.issue || activeLog.task || activeLog.cr;
+    // Emit WebSocket event before discard
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`user:${userId}`).emit('timer:stopped', {
+          itemId: String(itemId),
+          discarded: true,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
+    }
+
     // Minimum duration: 5 minutes. Reject and discard the log to avoid clutter.
     await activeLog.deleteOne();
     await updateItemTotalTimeSpent(activeLog);
@@ -411,21 +442,44 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '') => {
 
   await activeLog.save();
 
-  // Update project used hours immediately after saving the log
+  // Recalculate project total used hours
   await updateProjectUsedHours(activeLog.project);
   await updateItemTotalTimeSpent(activeLog);
 
-  // Auto-transition issue to Review
+  // Trigger project budget threshold check
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(activeLog.project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
+      }
+    } catch (err) {
+      logger.error('Failed to check budget thresholds after timer stop', { error: err.message });
+    }
+  });
+
+  // Emit WebSocket event
+  try {
+    const io = getIO();
+    if (io) {
+      const itemId = activeLog.issue || activeLog.task || activeLog.cr;
+      io.to(`user:${userId}`).emit('timer:stopped', {
+        itemId: String(itemId),
+        discarded: false,
+        timeLog: activeLog.toJSON ? activeLog.toJSON() : activeLog,
+      });
+      logger.info(`WebSocket timer:stopped emitted to user:${userId} for item ${itemId}`);
+    }
+  } catch (error) {
+    logger.error('Failed to emit timer:stopped via WebSocket', { error: error.message });
+  }
+
+  // Trigger time limit exceeded check in a non-blocking block (only for issues)
   if (activeLog.issue) {
-    await Issue.updateOne({ _id: activeLog.issue }, { status: 'Review' });
     Promise.resolve().then(() => {
       checkAndNotifyTimeExceeded(activeLog.issue, activeLog.duration, 0, userId);
     });
-  }
-
-  // Auto-transition task to Review
-  if (activeLog.task) {
-    await Task.updateOne({ _id: activeLog.task, status: { $ne: 'Done' } }, { status: 'Review' });
   }
 
   // E1: Notify project managers that a time log has been submitted for review
@@ -526,36 +580,22 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
     throw new ApiError(httpStatus.BAD_REQUEST, 'Single time log entry cannot exceed 12 hours');
   }
 
-  // Support stage: enforce monthly allocation hours
-  const projectDoc = await Project.findById(project);
-  if (projectDoc && projectDoc.stage === 'support' && projectDoc.allocatedHours > 0) {
-    const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
-    const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 1);
-    const monthlyAgg = await TimeLog.aggregate([
-      { $match: { project: projectDoc._id, deletedAt: null, startTime: { $gte: monthStart, $lt: monthEnd } } },
-      { $group: { _id: null, total: { $sum: '$duration' } } },
-    ]);
-    const monthlyUsed = monthlyAgg.length > 0 ? monthlyAgg[0].total : 0;
-    if (monthlyUsed >= projectDoc.allocatedHours) {
-      throw new ApiError(
-        httpStatus.FORBIDDEN,
-        `Monthly allocation of ${projectDoc.allocatedHours}h for this support project has been reached (${monthlyUsed.toFixed(2)}h used). No more time can be logged this month.`
-      );
-    }
-  }
-
-  // Check for overlaps for this user
-  const overlappingLog = await TimeLog.findOne({
+  // Check for overlaps for this user on this specific item
+  const overlapQuery = {
     user: userId,
     deletedAt: null,
     $or: [
       { startTime: { $lt: end }, endTime: { $gt: start } },
       { startTime: { $lt: end }, endTime: null },
     ],
-  });
+  };
+  if (issueId) overlapQuery.issue = issueId;
+  else if (taskId) overlapQuery.task = taskId;
+  else if (crId) overlapQuery.cr = crId;
 
+  const overlappingLog = await TimeLog.findOne(overlapQuery);
   if (overlappingLog) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'Manual time log overlaps with an existing time log or active timer.');
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Manual time log overlaps with an existing time log or active timer for this item.');
   }
 
   const duration = parseFloat((diffMins / 60).toFixed(2));
@@ -573,6 +613,22 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
     note,
     isBillable,
     approved: false, // Managers must approve
+  });
+
+  // Recalculate project total used hours
+  await updateProjectUsedHours(project);
+
+  // Trigger project budget threshold check
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
+      }
+    } catch (err) {
+      logger.error('Failed to check budget thresholds after manual log creation', { error: err.message });
+    }
   });
 
   // Trigger time limit exceeded check in a non-blocking block (only for issues)
@@ -641,6 +697,13 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
 const queryTimeLogs = async (filter, options) => {
   await autoStopExceededTimers();
   const queryFilter = { ...filter, deletedAt: null };
+  if (queryFilter.active === 'true' || queryFilter.active === true) {
+    queryFilter.endTime = null;
+    delete queryFilter.active;
+  } else if (queryFilter.active === 'false' || queryFilter.active === false) {
+    queryFilter.endTime = { $ne: null };
+    delete queryFilter.active;
+  }
   const logs = await TimeLog.paginate(queryFilter, {
     ...options,
     populate: 'issue task cr user project',
@@ -730,7 +793,7 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
 
   await timeLog.save();
 
-  // If approval status was modified, update project stats
+  // Recalculate project stats
   await updateProjectUsedHours(timeLog.project._id);
   await updateItemTotalTimeSpent(timeLog);
   if (previousTask && previousTask.toString() !== (timeLog.task ? timeLog.task.toString() : '')) {
@@ -744,20 +807,18 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
   }
 
   // B3/B4: Check project budget thresholds after hour recalculation
-  if (approvalChanged && currentApproved) {
-    Promise.resolve().then(async () => {
-      try {
-        const projectDoc = await Project.findById(timeLog.project._id || timeLog.project);
-        if (projectDoc) {
-          const projectService = require('../project-management/project.service');
-          await projectService.checkBudgetThresholds(projectDoc);
-        }
-      } catch (err) {
-        const logger = require('../../config/logger');
-        logger.error('Failed to check budget thresholds', { error: err.message });
+  Promise.resolve().then(async () => {
+    try {
+      const projectDoc = await Project.findById(timeLog.project._id || timeLog.project);
+      if (projectDoc) {
+        const projectService = require('../project-management/project.service');
+        await projectService.checkBudgetThresholds(projectDoc);
       }
-    });
-  }
+    } catch (err) {
+      const logger = require('../../config/logger');
+      logger.error('Failed to check budget thresholds', { error: err.message });
+    }
+  });
 
   // E2: Notify the developer when their time log is approved/rejected
   if (approvalChanged) {

@@ -46,7 +46,8 @@ const timeLogSchema = new mongoose.Schema(
       type: String,
       enum: [
         'Backlog', 'Assigned', 'Planned Solution', 'In Progress', 'Testing', 'Resolved', 'Closed', 'Reopened', 'On Hold', 'Pending Client',
-        'To Do', 'Review', 'Done', 'Submitted', 'Rejected', 'In Development', 'Completed'
+        'To Do', 'Review', 'Done', 'Submitted', 'Rejected', 'In Development', 'Completed',
+        'Development', 'Investigation', 'Communication', 'Documentation', 'Docs', 'Deployment'
       ],
       required: true,
     },

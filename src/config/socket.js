@@ -52,6 +52,16 @@ const init = (httpServer) => {
       socket.leave(`project:${projectId}`);
     });
 
+    socket.on('timer:pause', (data) => {
+      logger.info(`WS user:${socket.userId} paused timer ${data?.itemId}`);
+      io.to(`user:${socket.userId}`).emit('timer:paused', data);
+    });
+
+    socket.on('timer:resume', (data) => {
+      logger.info(`WS user:${socket.userId} resumed timer ${data?.itemId}`);
+      io.to(`user:${socket.userId}`).emit('timer:resumed', data);
+    });
+
     socket.on('disconnect', () => {
       logger.info(`WS disconnected: ${socket.id}`);
     });
