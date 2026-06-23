@@ -5,6 +5,7 @@ const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const { initReportJobs } = require('./jobs/report.job');
 const { initNotificationJobs } = require('./jobs/notification.job');
+const { initUomSnapshotJob } = require('./jobs/uom-snapshot.job');
 const socketServer = require('./config/socket');
 
 let server;
@@ -34,6 +35,13 @@ const startServer = async () => {
     initNotificationJobs();
   } catch (error) {
     logger.warn('Failed to initialize notification jobs', { error: error.message });
+  }
+
+  // 6. Initialize monthly UOM snapshot auto-generation job
+  try {
+    initUomSnapshotJob();
+  } catch (error) {
+    logger.warn('Failed to initialize UOM snapshot job', { error: error.message });
   }
 };
 

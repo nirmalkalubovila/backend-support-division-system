@@ -23,6 +23,7 @@ const autoStopExceededTimers = async () => {
           log.duration = parseFloat(estHours.toFixed(2));
           log.note = log.note ? `${log.note} [Ended automatically]` : '[Ended automatically]';
           await log.save();
+          await updateItemTotalTimeSpent(log);
           
           if (log.issue) {
             await Issue.updateOne({ _id: log.issue._id }, { status: 'Review' });
@@ -69,6 +70,93 @@ const updateProjectUsedHours = async (projectId) => {
     { _id: projectId },
     { usedHours: parseFloat(totalHours.toFixed(2)) }
   );
+};
+
+/**
+ * Recalculate total time spent on issue, task, or CR based on completed time logs
+ * @param {object} log
+ * @returns {Promise<void>}
+ */
+const updateItemTotalTimeSpent = async (log) => {
+  if (!log) return;
+  try {
+    const { task, issue, cr } = log;
+    
+    if (task) {
+      const taskId = task._id || task;
+      const aggregate = await TimeLog.aggregate([
+        {
+          $match: {
+            task: new mongoose.Types.ObjectId(taskId),
+            endTime: { $ne: null },
+            deletedAt: null,
+          },
+        },
+        {
+          $group: {
+            _id: '$task',
+            totalHours: { $sum: '$duration' },
+          },
+        },
+      ]);
+      const totalHours = aggregate.length > 0 ? aggregate[0].totalHours : 0;
+      await Task.updateOne(
+        { _id: taskId },
+        { totalTimeSpent: parseFloat(totalHours.toFixed(2)) }
+      );
+    }
+
+    if (issue) {
+      const issueId = issue._id || issue;
+      const aggregate = await TimeLog.aggregate([
+        {
+          $match: {
+            issue: new mongoose.Types.ObjectId(issueId),
+            endTime: { $ne: null },
+            deletedAt: null,
+          },
+        },
+        {
+          $group: {
+            _id: '$issue',
+            totalHours: { $sum: '$duration' },
+          },
+        },
+      ]);
+      const totalHours = aggregate.length > 0 ? aggregate[0].totalHours : 0;
+      await Issue.updateOne(
+        { _id: issueId },
+        { totalTimeSpent: parseFloat(totalHours.toFixed(2)) }
+      );
+    }
+
+    if (cr) {
+      const crId = cr._id || cr;
+      const aggregate = await TimeLog.aggregate([
+        {
+          $match: {
+            cr: new mongoose.Types.ObjectId(crId),
+            endTime: { $ne: null },
+            deletedAt: null,
+          },
+        },
+        {
+          $group: {
+            _id: '$cr',
+            totalHours: { $sum: '$duration' },
+          },
+        },
+      ]);
+      const totalHours = aggregate.length > 0 ? aggregate[0].totalHours : 0;
+      await ChangeRequest.updateOne(
+        { _id: crId },
+        { totalTimeSpent: parseFloat(totalHours.toFixed(2)) }
+      );
+    }
+  } catch (error) {
+    const logger = require('../../config/logger');
+    logger.error('Error updating item total time spent: ' + error.message);
+  }
 };
 
 /**
@@ -193,6 +281,54 @@ const startTimer = async (userId, issueId, taskId, crId, workType, note = '', is
     return existingActiveLog;
   }
 
+  // Auto-stop any existing active timers for this user
+  const otherActiveLogs = await TimeLog.find({
+    user: userId,
+    endTime: null,
+    deletedAt: null,
+  });
+
+  for (const log of otherActiveLogs) {
+    if (
+      (issueId && String(log.issue) === String(issueId)) ||
+      (taskId && String(log.task) === String(taskId)) ||
+      (crId && String(log.cr) === String(crId))
+    ) {
+      continue;
+    }
+
+    const end = new Date();
+    const diffMs = end - log.startTime;
+    const diffMins = diffMs / (1000 * 60);
+
+    if (diffMins < 5) {
+      await log.deleteOne();
+      await updateItemTotalTimeSpent(log);
+    } else {
+      let duration = diffMins / 60;
+      let noteText = log.note;
+      if (duration > 12) {
+        duration = 12;
+        noteText = noteText ? `${noteText} [FLAGGED: Session exceeded 12 hours]` : '[FLAGGED: Session exceeded 12 hours]';
+      }
+      log.endTime = end;
+      log.duration = parseFloat(duration.toFixed(2));
+      log.note = noteText ? `${noteText} [Auto-stopped]` : '[Auto-stopped]';
+      await log.save();
+      await updateProjectUsedHours(log.project);
+      await updateItemTotalTimeSpent(log);
+
+      // Auto-transition stopped items to Review
+      if (log.issue) {
+        await Issue.updateOne({ _id: log.issue }, { status: 'Review' });
+      } else if (log.task) {
+        await Task.updateOne({ _id: log.task, status: { $ne: 'Done' } }, { status: 'Review' });
+      } else if (log.cr) {
+        await ChangeRequest.updateOne({ _id: log.cr, status: { $ne: 'Done' } }, { status: 'Review' });
+      }
+    }
+  }
+
   const timeLog = await TimeLog.create({
     issue: issueId || null,
     task: taskId || null,
@@ -289,6 +425,7 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuratio
 
     // Minimum duration: 5 minutes. Reject and discard the log to avoid clutter.
     await activeLog.deleteOne();
+    await updateItemTotalTimeSpent(activeLog);
     throw new ApiError(httpStatus.BAD_REQUEST, 'Time log duration is less than 5 minutes. The session has been discarded.');
   }
 
@@ -307,6 +444,7 @@ const stopTimer = async (userId, issueId, taskId, crId, note = '', activeDuratio
 
   // Recalculate project total used hours
   await updateProjectUsedHours(activeLog.project);
+  await updateItemTotalTimeSpent(activeLog);
 
   // Trigger project budget threshold check
   Promise.resolve().then(async () => {
@@ -502,6 +640,7 @@ const createManualLog = async (userId, issueId, taskId, crId, startTime, endTime
 
   // Update project used hours
   await updateProjectUsedHours(project);
+  await updateItemTotalTimeSpent(timeLog);
 
   // E1: Notify project managers that a manual time log has been submitted
   Promise.resolve().then(async () => {
@@ -588,6 +727,9 @@ const getTimeLogById = async (id) => {
  */
 const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) => {
   const timeLog = await getTimeLogById(logId);
+  const previousTask = timeLog.task;
+  const previousIssue = timeLog.issue;
+  const previousCr = timeLog.cr;
   const previousDuration = timeLog.duration || 0;
   const previousApprovalStatus = timeLog.approved;
 
@@ -653,6 +795,16 @@ const updateTimeLog = async (logId, updateBody, currentUserId, currentUserRole) 
 
   // Recalculate project stats
   await updateProjectUsedHours(timeLog.project._id);
+  await updateItemTotalTimeSpent(timeLog);
+  if (previousTask && previousTask.toString() !== (timeLog.task ? timeLog.task.toString() : '')) {
+    await updateItemTotalTimeSpent({ task: previousTask });
+  }
+  if (previousIssue && previousIssue.toString() !== (timeLog.issue ? timeLog.issue.toString() : '')) {
+    await updateItemTotalTimeSpent({ issue: previousIssue });
+  }
+  if (previousCr && previousCr.toString() !== (timeLog.cr ? timeLog.cr.toString() : '')) {
+    await updateItemTotalTimeSpent({ cr: previousCr });
+  }
 
   // B3/B4: Check project budget thresholds after hour recalculation
   Promise.resolve().then(async () => {
@@ -723,6 +875,7 @@ const deleteTimeLog = async (logId) => {
 
   // Recalculate project hours
   await updateProjectUsedHours(timeLog.project._id);
+  await updateItemTotalTimeSpent(timeLog);
 
   return timeLog;
 };

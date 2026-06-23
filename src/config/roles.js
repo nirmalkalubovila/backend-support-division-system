@@ -40,6 +40,7 @@ roleRights.set('senior_engineer', [
   'projects.cr.read',
   'finance.payment.read',
   'user_management.user.read',
+  'finance.uom.read',
 ]);
 
 // Manager / PM — full project + report + user access
@@ -86,6 +87,14 @@ roleRights.set('manager', [
   'finance.payment.create',
   'finance.payment.update',
   'finance.payment.delete',
+  'finance.uom.read',
+  'finance.uom.configure',
+  'finance.uom.snapshot.create',
+  'finance.uom.snapshot.update',
+  'finance.uom.snapshot.finalize',
+  'finance.uom.snapshot.unlock',
+  'finance.uom.snapshot.override',
+  'finance.uom.snapshot.delete',
 ]);
 
 // Super Admin — everything

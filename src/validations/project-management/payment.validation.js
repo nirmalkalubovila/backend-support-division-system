@@ -3,17 +3,10 @@ const Joi = require('joi');
 const createPayment = {
   params: Joi.object({ projectId: Joi.string().required() }),
   body: Joi.object({
-    paymentType: Joi.string().valid('Advance', 'UOM Based').required(),
-    uom: Joi.string().valid('Hour', 'Task', 'Milestone', 'Month', 'Custom').when('paymentType', {
-      is: 'UOM Based',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(null),
-    }),
-    quantity: Joi.number().min(0).when('paymentType', {
-      is: 'UOM Based',
-      then: Joi.required(),
-      otherwise: Joi.optional().allow(null),
-    }),
+    paymentType: Joi.string().valid('Advance', 'Project Fixed Price', 'CR Based', 'UOM Based', 'Other').required(),
+    uom: Joi.string().allow(null, ''),
+    month: Joi.string().allow(null, ''),
+    quantity: Joi.number().min(0).allow(null),
     pricePerUnit: Joi.number().min(0).required(),
     paymentDate: Joi.date().allow(null),
     dueDate: Joi.date().allow(null),
@@ -28,8 +21,9 @@ const createPayment = {
 const updatePayment = {
   params: Joi.object({ projectId: Joi.string().required(), paymentId: Joi.string().required() }),
   body: Joi.object({
-    paymentType: Joi.string().valid('Advance', 'UOM Based'),
+    paymentType: Joi.string().valid('Advance', 'Project Fixed Price', 'CR Based', 'UOM Based', 'Other'),
     uom: Joi.string().allow(null, ''),
+    month: Joi.string().allow(null, ''),
     quantity: Joi.number().min(0).allow(null),
     pricePerUnit: Joi.number().min(0),
     paymentDate: Joi.date().allow(null),
@@ -54,4 +48,15 @@ const deletePayment = {
   params: Joi.object({ projectId: Joi.string().required(), paymentId: Joi.string().required() }),
 };
 
-module.exports = { createPayment, updatePayment, getPayments, getPayment, deletePayment };
+const allocatePayment = {
+  params: Joi.object({ projectId: Joi.string().required(), paymentId: Joi.string().required() }),
+  body: Joi.object({
+    amount: Joi.number().positive().required(),
+    paymentMethod: Joi.string().valid('Bank Transfer', 'Cash', 'Online Payment').allow(null),
+    paymentDate: Joi.date().allow(null),
+    referenceNumber: Joi.string().allow(null, ''),
+    notes: Joi.string().allow(null, ''),
+  }),
+};
+
+module.exports = { createPayment, updatePayment, getPayments, getPayment, deletePayment, allocatePayment };
