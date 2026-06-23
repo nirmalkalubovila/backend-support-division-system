@@ -15,6 +15,7 @@ const brandingService = require('./system/branding.service');
 const timeLogService = require('./time-tracking/time-log.service');
 const notificationService = require('./system/notification.service');
 const paymentService = require('./project-management/payment.service');
+const uomService = require('./project-management/uom.service');
 
 module.exports = {
   authService,
@@ -34,4 +35,5 @@ module.exports = {
   timeLogService,
   notificationService,
   paymentService,
+  uomService,
 };
