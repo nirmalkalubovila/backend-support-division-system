@@ -45,8 +45,15 @@ const resolvePrice = (baseline, uomTypeId, billingMonth) => {
     return uomType ? { price: uomType.baselinePrice, versionId: null } : { price: 0, versionId: null };
   }
 
-  // Sort descending by effectiveFrom to get the most recent applicable version
-  versions.sort((a, b) => (a.effectiveFrom > b.effectiveFrom ? -1 : 1));
+  // Sort descending by effectiveFrom, fallback to createdAt descending to get the absolute newest version
+  versions.sort((a, b) => {
+    if (a.effectiveFrom !== b.effectiveFrom) {
+      return a.effectiveFrom > b.effectiveFrom ? -1 : 1;
+    }
+    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return timeB - timeA;
+  });
   return { price: versions[0].pricePerUnit, versionId: versions[0]._id };
 };
 
@@ -209,6 +216,15 @@ const configureBaseline = async (projectId, { uomTypes }, userId = null, billing
     await savedBaseline.save();
   }
 
+  const draftSnapshots = await UomSnapshot.find({
+    project: projectId,
+    status: 'draft',
+    deletedAt: null,
+  });
+  for (const snap of draftSnapshots) {
+    await refreshSnapshotPrices(snap._id, userId);
+  }
+
   return UomBaseline.findById(baseline._id)
     .populate('project')
     .populate('createdBy', 'name email')
@@ -219,7 +235,7 @@ const configureBaseline = async (projectId, { uomTypes }, userId = null, billing
  * Update the price for a single UOM type, creating a new pricing version.
  * Closes the currently active version for that type.
  */
-const updateUomPrice = async (projectId, uomTypeId, { pricePerUnit, effectiveFrom, notes }, userId = null) => {
+const updateUomPrice = async (projectId, uomTypeId, { pricePerUnit, defaultCount, effectiveFrom, notes }, userId = null) => {
   const baseline = await UomBaseline.findOne({ project: projectId, deletedAt: null });
   if (!baseline) throw new ApiError(httpStatus.NOT_FOUND, 'UOM baseline not found for this project');
 
@@ -246,18 +262,30 @@ const updateUomPrice = async (projectId, uomTypeId, { pricePerUnit, effectiveFro
     createdBy: userId,
   });
 
-  // Also update the baselinePrice reference on the type itself
+  // Also update the baseline fields on the type itself
   uomType.baselinePrice = pricePerUnit;
+  if (defaultCount !== undefined) {
+    uomType.defaultCount = defaultCount;
+  }
   baseline.updatedBy = userId;
 
   baseline.auditLog.push({
     action: 'price_updated',
     changedBy: userId,
-    changes: { uomTypeId, uomTypeName: uomType.name, pricePerUnit, effectiveFrom: month },
+    changes: { uomTypeId, uomTypeName: uomType.name, pricePerUnit, defaultCount, effectiveFrom: month },
     notes: notes || null,
   });
 
   await baseline.save();
+
+  const draftSnapshots = await UomSnapshot.find({
+    project: projectId,
+    status: 'draft',
+    deletedAt: null,
+  });
+  for (const snap of draftSnapshots) {
+    await refreshSnapshotPrices(snap._id, userId);
+  }
 
   return UomBaseline.findById(baseline._id)
     .populate('project')
@@ -310,7 +338,14 @@ const buildSnapshotLines = (baseline, billingMonth, previousSnapshot = null) => 
     const typeIdStr = uomType._id.toString();
     const applicable = baseline.pricingVersions
       .filter((v) => v.uomTypeId.toString() === typeIdStr && v.effectiveFrom <= billingMonth)
-      .sort((a, b) => (a.effectiveFrom > b.effectiveFrom ? -1 : 1));
+      .sort((a, b) => {
+        if (a.effectiveFrom !== b.effectiveFrom) {
+          return a.effectiveFrom > b.effectiveFrom ? -1 : 1;
+        }
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
     if (applicable.length > 0) {
       priceByName.set(uomType.name.toLowerCase().trim(), Number(applicable[0].pricePerUnit));
     }
@@ -522,7 +557,7 @@ const updateSnapshotCounts = async (snapshotId, { lines, notes }, userId = null)
  * Only updates price-related fields — counts are preserved.
  * Throws 400 if the snapshot is already finalised.
  */
-const refreshSnapshotPrices = async (snapshotId, userId = null) => {
+async function refreshSnapshotPrices(snapshotId, userId = null) {
   const snapshotCheck = await UomSnapshot.findOne({ _id: snapshotId, deletedAt: null });
   if (!snapshotCheck) throw new ApiError(httpStatus.NOT_FOUND, 'UOM snapshot not found');
 
@@ -551,7 +586,14 @@ const refreshSnapshotPrices = async (snapshotId, userId = null) => {
     const typeIdStr = uomType._id.toString();
     const applicable = baseline.pricingVersions
       .filter((v) => v.uomTypeId.toString() === typeIdStr && v.effectiveFrom <= billingMonth)
-      .sort((a, b) => (a.effectiveFrom > b.effectiveFrom ? -1 : 1));
+      .sort((a, b) => {
+        if (a.effectiveFrom !== b.effectiveFrom) {
+          return a.effectiveFrom > b.effectiveFrom ? -1 : 1;
+        }
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
     if (applicable.length > 0) {
       const versionedPrice = Number(applicable[0].pricePerUnit);
       priceById.set(typeIdStr, versionedPrice);
@@ -572,10 +614,13 @@ const refreshSnapshotPrices = async (snapshotId, userId = null) => {
   const lines = snapshotCheck.lines.map((line) => {
     const lineObj = line.toObject();
     const newPrice = resolveLinePrice(line);
+    const uomType = baseline.uomTypes.id(line.uomTypeId);
+    const newCount = (uomType && !line.isManuallyEdited) ? uomType.defaultCount : line.count;
     return {
       ...lineObj,
+      count: newCount,
       pricePerUnit: newPrice,
-      lineTotal: parseFloat((Number(line.count) * newPrice).toFixed(2)),
+      lineTotal: parseFloat((Number(newCount) * newPrice).toFixed(2)),
     };
   });
 
@@ -619,7 +664,7 @@ const refreshSnapshotPrices = async (snapshotId, userId = null) => {
  * Auto-creates a UOM Based Payment record for the snapshot's grand total.
  * Throws 400 if already finalised.
  */
-const finalizeSnapshot = async (snapshotId, { notes } = {}, userId = null) => {
+const finalizeSnapshot = async (snapshotId, body = {}, userId = null) => {
   const snapshot = await getSnapshotById(snapshotId);
 
   if (snapshot.status === 'finalized') {
@@ -636,7 +681,7 @@ const finalizeSnapshot = async (snapshotId, { notes } = {}, userId = null) => {
   rawSnapshot.auditLog.push({
     action: 'finalized',
     changedBy: userId,
-    notes: notes || null,
+    notes: body.notes || null,
   });
 
   await rawSnapshot.save();
@@ -650,17 +695,22 @@ const finalizeSnapshot = async (snapshotId, { notes } = {}, userId = null) => {
       .map((l) => `${l.name}: ${l.count}`)
       .join(', ');
 
-    autoPayment = await Payment.create({
-      project: rawSnapshot.project,
+    const paymentService = require('./payment.service');
+    autoPayment = await paymentService.createPayment(rawSnapshot.project, {
       paymentType: 'UOM Based',
       uom: `UOM Snapshot ${rawSnapshot.billingMonth}`,
       month: rawSnapshot.billingMonth,
       quantity: null,           // null — grandTotal is stored directly in pricePerUnit
       pricePerUnit: rawSnapshot.grandTotal,
-      paymentStatus: 'Pending',
-      notes: `Auto-generated from UOM snapshot ${rawSnapshot.snapshotId}. Lines: ${linesSummary}`,
+      dueDate: body.dueDate || null,
+      paymentStatus: body.paymentStatus || 'Pending',
+      paymentMethod: body.paymentMethod || null,
+      paymentDate: body.paymentDate || null,
+      referenceNumber: body.referenceNumber || null,
+      notes: body.notes || `Auto-generated from UOM snapshot ${rawSnapshot.snapshotId}. Lines: ${linesSummary}`,
       uomSnapshot: rawSnapshot._id,
       isSystemGenerated: true,
+      partiallyPaidAmount: body.partiallyPaidAmount || null,
     });
 
     // Link the payment back to the snapshot

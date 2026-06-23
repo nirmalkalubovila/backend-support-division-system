@@ -37,11 +37,11 @@ const configureBaseline = catchAsync(async (req, res) => {
  * Update the price for a single UOM type (creates a new versioned record).
  */
 const updateUomPrice = catchAsync(async (req, res) => {
-  const { pricePerUnit, effectiveFrom, notes } = req.body;
+  const { pricePerUnit, defaultCount, effectiveFrom, notes } = req.body;
   const baseline = await uomService.updateUomPrice(
     req.params.projectId,
     req.params.uomTypeId,
-    { pricePerUnit, effectiveFrom, notes },
+    { pricePerUnit, defaultCount, effectiveFrom, notes },
     req.user.id
   );
   res.send(baseline);
@@ -142,7 +142,7 @@ const refreshSnapshotPrices = catchAsync(async (req, res) => {
 const finalizeSnapshot = catchAsync(async (req, res) => {
   const snapshot = await uomService.finalizeSnapshot(
     req.params.snapshotId,
-    { notes: req.body.notes },
+    req.body,
     req.user.id
   );
   res.send(snapshot);

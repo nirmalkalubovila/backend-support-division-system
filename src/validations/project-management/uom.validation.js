@@ -50,6 +50,7 @@ const updateUomPrice = {
   }),
   body: Joi.object({
     pricePerUnit: Joi.number().min(0).required(),
+    defaultCount: Joi.number().min(0).optional(),
     effectiveFrom: yearMonth.optional(),
     notes: Joi.string().allow(null, '').optional(),
   }),
@@ -123,7 +124,13 @@ const finalizeSnapshot = {
     snapshotId: objectId.required(),
   }),
   body: Joi.object({
+    dueDate: Joi.string().isoDate().allow(null, '').optional(),
+    paymentStatus: Joi.string().valid('Pending', 'Paid', 'Partially Paid', 'Overdue', 'Cancelled').optional(),
+    paymentMethod: Joi.string().valid('Bank Transfer', 'Cash', 'Online Payment').allow(null, '').optional(),
+    paymentDate: Joi.string().isoDate().allow(null, '').optional(),
+    referenceNumber: Joi.string().allow(null, '').optional(),
     notes: Joi.string().allow(null, '').optional(),
+    partiallyPaidAmount: Joi.number().min(0.01).optional(),
   }),
 };
 
