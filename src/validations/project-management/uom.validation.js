@@ -130,7 +130,7 @@ const finalizeSnapshot = {
     paymentDate: Joi.string().isoDate().allow(null, '').optional(),
     referenceNumber: Joi.string().allow(null, '').optional(),
     notes: Joi.string().allow(null, '').optional(),
-    partiallyPaidAmount: Joi.number().min(0.01).optional(),
+    partiallyPaidAmount: Joi.number().min(0.01).allow(null, '').optional(),
   }),
 };
 
