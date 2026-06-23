@@ -2,6 +2,7 @@ const httpStatus = require('http-status');
 const mongoose = require('mongoose');
 const { UomBaseline, UomSnapshot, Project, Payment } = require('../../models');
 const ApiError = require('../../utils/ApiError');
+const logger = require('../../config/logger');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -225,6 +226,31 @@ const configureBaseline = async (projectId, { uomTypes }, userId = null, billing
     await refreshSnapshotPrices(snap._id, userId);
   }
 
+  // Trigger notifications for UOM baseline configuration
+  try {
+    const { User } = require('../../models');
+    const notificationService = require('../system/notification.service');
+    const savedBaseline = await UomBaseline.findById(baseline._id).populate('project');
+    const projectName = savedBaseline?.project?.name || 'Unknown Project';
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+    
+    for (const recipient of adminsAndManagers) {
+      if (userId && String(recipient._id) === String(userId)) continue;
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'UOM Baseline Configured',
+        message: `The UOM billing baseline has been configured/updated for project "${projectName}".`,
+        type: 'info',
+        module: 'finance',
+        relatedId: baseline._id,
+        relatedLink: `/finance/${projectId}?tab=uom`,
+      });
+    }
+  } catch (err) {
+    logger.error('Failed to trigger UOM baseline configured notification', { error: err.message });
+  }
+
   return UomBaseline.findById(baseline._id)
     .populate('project')
     .populate('createdBy', 'name email')
@@ -285,6 +311,31 @@ const updateUomPrice = async (projectId, uomTypeId, { pricePerUnit, defaultCount
   });
   for (const snap of draftSnapshots) {
     await refreshSnapshotPrices(snap._id, userId);
+  }
+
+  // Trigger notifications for UOM price update
+  try {
+    const { User } = require('../../models');
+    const notificationService = require('../system/notification.service');
+    const savedBaseline = await UomBaseline.findById(baseline._id).populate('project');
+    const projectName = savedBaseline?.project?.name || 'Unknown Project';
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+    
+    for (const recipient of adminsAndManagers) {
+      if (userId && String(recipient._id) === String(userId)) continue;
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'UOM Price Updated',
+        message: `The UOM type "${uomType.name}" price has been updated to LKR ${pricePerUnit.toLocaleString()} for project "${projectName}".`,
+        type: 'info',
+        module: 'finance',
+        relatedId: baseline._id,
+        relatedLink: `/finance/${projectId}?tab=uom`,
+      });
+    }
+  } catch (err) {
+    logger.error('Failed to trigger UOM price updated notification', { error: err.message });
   }
 
   return UomBaseline.findById(baseline._id)
@@ -411,7 +462,7 @@ const generateMonthlySnapshot = async (projectId, billingMonth, userId = null) =
   const existing = await UomSnapshot.findOne({ project: projectId, billingMonth: month, deletedAt: null })
     .populate('project')
     .populate('baseline')
-    .populate('linkedPayment')
+    .populate({ path: 'linkedPayment', match: { deletedAt: null } })
     .populate('finalizedBy', 'name email')
     .populate('createdBy', 'name email');
 
@@ -446,10 +497,36 @@ const generateMonthlySnapshot = async (projectId, billingMonth, userId = null) =
     createdBy: userId,
   });
 
+  if (userId) {
+    try {
+      const { User, Project } = require('../../models');
+      const notificationService = require('../system/notification.service');
+      const project = await Project.findById(projectId);
+      const projectName = project ? project.name : 'Unknown Project';
+      const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+      
+      for (const recipient of adminsAndManagers) {
+        if (String(recipient._id) === String(userId)) continue;
+        await notificationService.createNotification({
+          recipient: recipient._id,
+          sender: userId,
+          title: 'Draft Snapshot Generated',
+          message: `A new billing snapshot for the month ${month} has been generated for project "${projectName}".`,
+          type: 'info',
+          module: 'finance',
+          relatedId: snapshot._id,
+          relatedLink: `/finance/${projectId}?tab=uom`,
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to trigger manual snapshot generated notification', { error: err.message });
+    }
+  }
+
   return UomSnapshot.findById(snapshot._id)
     .populate('project')
     .populate('baseline')
-    .populate('linkedPayment')
+    .populate({ path: 'linkedPayment', match: { deletedAt: null } })
     .populate('finalizedBy', 'name email')
     .populate('createdBy', 'name email');
 };
@@ -462,11 +539,20 @@ const querySnapshots = async (projectId, filter = {}, options = {}) => {
   if (filter.status) query.status = filter.status;
   if (filter.billingMonth) query.billingMonth = filter.billingMonth;
 
-  return UomSnapshot.paginate(query, {
-    ...options,
-    populate: 'project,linkedPayment',
+  const paginateOptions = { ...options };
+  delete paginateOptions.populate;
+
+  const result = await UomSnapshot.paginate(query, {
+    ...paginateOptions,
     sortBy: options.sortBy || 'billingMonth:desc',
   });
+
+  result.data = await UomSnapshot.populate(result.data, [
+    { path: 'project' },
+    { path: 'linkedPayment', match: { deletedAt: null } },
+  ]);
+
+  return result;
 };
 
 /**
@@ -476,7 +562,7 @@ const getSnapshotById = async (snapshotId) => {
   const snapshot = await UomSnapshot.findOne({ _id: snapshotId, deletedAt: null })
     .populate('project')
     .populate('baseline')
-    .populate('linkedPayment')
+    .populate({ path: 'linkedPayment', match: { deletedAt: null } })
     .populate('finalizedBy', 'name email')
     .populate('createdBy', 'name email');
 
@@ -491,7 +577,7 @@ const getSnapshotByMonth = async (projectId, billingMonth) => {
   const snapshot = await UomSnapshot.findOne({ project: projectId, billingMonth, deletedAt: null })
     .populate('project')
     .populate('baseline')
-    .populate('linkedPayment')
+    .populate({ path: 'linkedPayment', match: { deletedAt: null } })
     .populate('finalizedBy', 'name email')
     .populate('createdBy', 'name email');
 
@@ -728,6 +814,30 @@ const finalizeSnapshot = async (snapshotId, body = {}, userId = null) => {
     await rawSnapshot.save();
   }
 
+  try {
+    const { User, Project } = require('../../models');
+    const notificationService = require('../system/notification.service');
+    const project = await Project.findById(rawSnapshot.project);
+    const projectName = project ? project.name : 'Unknown Project';
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+    
+    for (const recipient of adminsAndManagers) {
+      if (userId && String(recipient._id) === String(userId)) continue;
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'UOM Snapshot Finalised',
+        message: `Billing snapshot ${rawSnapshot.snapshotId} (${rawSnapshot.billingMonth}) has been finalised for project "${projectName}". System payment ${autoPayment.paymentId} has been created.`,
+        type: 'success',
+        module: 'finance',
+        relatedId: rawSnapshot._id,
+        relatedLink: `/finance/${rawSnapshot.project}?tab=payments`,
+      });
+    }
+  } catch (err) {
+    logger.error('Failed to trigger finalised snapshot notification', { error: err.message });
+  }
+
   return getSnapshotById(rawSnapshot._id);
 };
 
@@ -777,6 +887,31 @@ const unlockSnapshot = async (snapshotId, { reason }, userId = null) => {
   }
 
   await rawSnapshot.save();
+
+  try {
+    const { User, Project } = require('../../models');
+    const notificationService = require('../system/notification.service');
+    const project = await Project.findById(rawSnapshot.project);
+    const projectName = project ? project.name : 'Unknown Project';
+    const adminsAndManagers = await User.find({ role: { $in: ['super_admin', 'manager'] }, deletedAt: null });
+    
+    for (const recipient of adminsAndManagers) {
+      if (userId && String(recipient._id) === String(userId)) continue;
+      await notificationService.createNotification({
+        recipient: recipient._id,
+        sender: userId,
+        title: 'UOM Snapshot Unlocked',
+        message: `Billing snapshot ${rawSnapshot.snapshotId} (${rawSnapshot.billingMonth}) has been unlocked for corrections by a manager for project "${projectName}".`,
+        type: 'warning',
+        module: 'finance',
+        relatedId: rawSnapshot._id,
+        relatedLink: `/finance/${rawSnapshot.project}?tab=uom`,
+      });
+    }
+  } catch (err) {
+    logger.error('Failed to trigger snapshot unlocked notification', { error: err.message });
+  }
+
   return getSnapshotById(rawSnapshot._id);
 };
 

@@ -30,7 +30,7 @@ const updatePayment = catchAsync(async (req, res) => {
   if (body.quantity !== undefined) body.quantity = Number(body.quantity);
   if (body.pricePerUnit !== undefined) body.pricePerUnit = Number(body.pricePerUnit);
   if (req.file) body.attachment = `/uploads/payments/${path.basename(req.file.path)}`;
-  const payment = await paymentService.updatePaymentById(req.params.paymentId, body);
+  const payment = await paymentService.updatePaymentById(req.params.paymentId, body, req.user.id);
   res.send(payment);
 });
 
@@ -42,7 +42,7 @@ const deletePayment = catchAsync(async (req, res) => {
 const allocatePayment = catchAsync(async (req, res) => {
   const body = { ...req.body };
   if (body.amount !== undefined) body.amount = Number(body.amount);
-  const payment = await paymentService.allocatePayment(req.params.paymentId, body);
+  const payment = await paymentService.allocatePayment(req.params.paymentId, body, req.user.id);
   res.send(payment);
 });
 

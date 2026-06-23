@@ -31,7 +31,7 @@ const notificationSchema = new mongoose.Schema(
     },
     module: {
       type: String,
-      enum: ['issues', 'projects', 'crs', 'tasks', 'time-tracking', 'system'],
+      enum: ['issues', 'projects', 'crs', 'tasks', 'time-tracking', 'system', 'finance'],
       required: true,
     },
     relatedId: {

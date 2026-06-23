@@ -58,6 +58,7 @@ const updateNotifications = {
       tasks: modulePreferenceSchema.required(),
       'time-tracking': modulePreferenceSchema.required(),
       system: modulePreferenceSchema.required(),
+      finance: modulePreferenceSchema.required(),
     }).required(),
   }),
 };
