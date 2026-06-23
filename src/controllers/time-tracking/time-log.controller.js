@@ -10,8 +10,8 @@ const startTimer = catchAsync(async (req, res) => {
 });
 
 const stopTimer = catchAsync(async (req, res) => {
-  const { issueId, taskId, crId, note } = req.body;
-  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, taskId, crId, note);
+  const { issueId, taskId, crId, note, activeDuration } = req.body;
+  const timeLog = await timeLogService.stopTimer(req.user._id, issueId, taskId, crId, note, activeDuration);
   res.status(httpStatus.OK).send(timeLog);
 });
 
@@ -32,7 +32,7 @@ const createManualLog = catchAsync(async (req, res) => {
 });
 
 const getTimeLogs = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['issue', 'task', 'cr', 'user', 'project', 'approved']);
+  const filter = pick(req.query, ['issue', 'task', 'cr', 'user', 'project', 'approved', 'active']);
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await timeLogService.queryTimeLogs(filter, options);
   res.status(httpStatus.OK).send(result);

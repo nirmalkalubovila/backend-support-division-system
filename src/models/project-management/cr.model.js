@@ -43,7 +43,7 @@ const crSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['To Do', 'Rejected', 'In Progress', 'Review', 'Done', 'Closed'],
+      enum: ['To Do', 'In Progress', 'Review', 'Done'],
       default: 'To Do',
     },
     requestedBy: { type: String, trim: true, default: null },
@@ -69,6 +69,25 @@ const crSchema = new mongoose.Schema(
       total: { type: Number, default: 0 },
       done: { type: Number, default: 0 },
       completionPercentage: { type: Number, default: 0 },
+    },
+    isReopened: {
+      type: Boolean,
+      default: false,
+    },
+    submittedForReview: {
+      type: Boolean,
+      default: false,
+    },
+    reopenReason: {
+      type: String,
+      default: null,
+    },
+    reassignRequest: {
+      requestedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      reason: { type: String, default: null },
+      requestedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+      status: { type: String, enum: ['Pending', 'Approved', 'Rejected'], default: null },
+      requestedAt: { type: Date, default: null },
     },
     deletedAt: { type: Date, default: null },
   },

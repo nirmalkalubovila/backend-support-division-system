@@ -18,6 +18,8 @@ router
   )
   .get(auth('projects.project.read'), validate(projectValidation.getProjects), projectController.getProjects);
 
+router.get('/monthly-usage', auth('projects.project.read'), validate(projectValidation.getMonthlyUsage), projectController.getMonthlyUsage);
+
 router
   .route('/:projectId')
   .get(auth('projects.project.read'), validate(projectValidation.getProject), projectController.getProject)

@@ -12,12 +12,15 @@ roleRights.set('intern', [
   'projects.project.read',
   'projects.task.read',
   'projects.cr.read',
+  'projects.task.update',
+  'projects.cr.update',
   'time_tracking.time_log.create',
   'time_tracking.time_log.read',
   'reports.user_performance.read',
   'system.settings.read',
   'system.notification.read',
   'system.notification.update',
+  'user_management.user.read',
 ]);
 
 // Engineer — frontline resolution
@@ -36,6 +39,7 @@ roleRights.set('senior_engineer', [
   'projects.task.read',
   'projects.cr.read',
   'finance.payment.read',
+  'user_management.user.read',
   'finance.uom.read',
 ]);
 
