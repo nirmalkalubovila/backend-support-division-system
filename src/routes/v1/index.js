@@ -16,6 +16,7 @@ const notificationRoute = require('./system/notification.route');
 const globalTaskRoute = require('./projects/tasks/global-task.route');
 const globalCrRoute = require('./projects/crs/global-cr.route');
 const { router: paymentRoute, globalRouter: financeRoute } = require('./projects/payments/payment.route');
+const uomRoute = require('./projects/uom/uom.route');
 
 const router = express.Router();
 
@@ -46,5 +47,6 @@ defaultRoutes.forEach((route) => {
 router.use('/projects/:projectId/tasks', taskRoute);
 router.use('/projects/:projectId/crs', crRoute);
 router.use('/projects/:projectId/payments', paymentRoute);
+router.use('/projects/:projectId/uom', uomRoute);
 
 module.exports = router;
